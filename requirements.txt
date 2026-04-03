@@ -1,0 +1,17 @@
+streamlit
+pandas
+numpy
+plotly
+networkx
+scikit-learn
+sentence-transformers
+torch
+transformers
+protobuf
+sentencepiece
+nltk
+tqdm
+requests
+groq
+python-dotenv
+matplotlib
