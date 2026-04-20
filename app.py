@@ -70,7 +70,7 @@ except Exception as e:
 # --- URLs ---
 CFA_LOGO_URL = "https://opportunities.codeforafrica.org/wp-content/uploads/sites/5/2015/11/1-Zq7KnTAeKjBf6eENRsacSQ.png"
 MELTWATER_URL = "https://raw.githubusercontent.com/hanna-tes/Disinfo_monitoring_RadarSystem/refs/heads/main/Co%CC%82te_dIvoire_OR_Ivory_Coast_OR_Abidjan_OR_Ivoirien%20-%20Nov%205%2C%202025%20-%203%2058%2048%20PM.csv"
-CIVICSIGNALS_URL = "https://raw.githubusercontent.com/hanna-tes/Disinfo_monitoring_RadarSystem/refs/heads/main/cote-d-ivoire-or-ivory-all-story-urls-20251105131200.csv"
+CIVICSIGNALS_URL = "https://raw.githubusercontent.com/hanna-tes/Ethiopia-election-monitoring/refs/heads/main/EthiopiaCivicsignalMar8.csv?token=GHSAT0AAAAAADRDAPFLHLGT4462WCZI6VWC2PF6APQ"
 TIKTOK_URL = "https://raw.githubusercontent.com/hanna-tes/Disinfo_monitoring_RadarSystem/refs/heads/main/TikTok_Oct_Nov.csv"
 OPENMEASURES_URL = "https://raw.githubusercontent.com/hanna-tes/Disinfo_monitoring_RadarSystem/refs/heads/main/open-measures-data%20(4).csv"
 ORIGINAL_POSTS_URL = "https://raw.githubusercontent.com/hanna-tes/Disinfo_monitoring_RadarSystem/refs/heads/main/Co%CC%82te_dIvoire_OR_Ivory_Coast_OR_Abidjan_OR_Ivoirien%20-%20Jan%2029%2C%202026%20-%205%2021%2000%20PM.csv"
