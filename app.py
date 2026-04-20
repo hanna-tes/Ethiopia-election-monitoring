@@ -198,17 +198,63 @@ ORIGINAL_POSTS_URL = "https://raw.githubusercontent.com/hanna-tes/Ethiopia-elect
 
 # --- Helper Functions ---
 def load_data_robustly(url, name, default_sep=','):
+    """
+    Load CSV from URL with enhanced error logging.
+    Uses your exact logic + better diagnostics.
+    """
     df = pd.DataFrame()
-    if not url: return df
-    attempts = [(',', 'utf-8'), (',', 'utf-8-sig'), ('\t', 'utf-8'), (';', 'utf-8'), ('\t', 'utf-16'), (',', 'latin-1')]
+    if not url:
+        logger.warning(f"⚠️ {name}: No URL provided")
+        return df
+    
+    logger.info(f"🔍 {name}: Attempting to load from: {url[:100]}...")
+    
+    attempts = [
+        (',', 'utf-8'),
+        (',', 'utf-8-sig'),
+        ('\t', 'utf-8'),
+        (';', 'utf-8'),
+        ('\t', 'utf-16'),
+        (',', 'latin-1'),
+    ]
+    
+    last_error = None
     for sep, enc in attempts:
         try:
-            df = pd.read_csv(url, sep=sep, low_memory=False, on_bad_lines='skip', encoding=enc)
+            logger.debug(f"  → Trying sep='{sep}', enc='{enc}'...")
+            df = pd.read_csv(
+                url, 
+                sep=sep, 
+                low_memory=False, 
+                on_bad_lines='skip', 
+                encoding=enc,
+                timeout=30  # Add timeout to prevent hanging
+            )
             if not df.empty and len(df.columns) > 1:
-                logger.info(f"✅ {name} loaded (Shape: {df.shape})")
+                logger.info(f"✅ {name} loaded successfully (Sep: '{sep}', Enc: '{enc}', Shape: {df.shape})")
+                logger.info(f"📋 {name} columns: {list(df.columns)}")
                 return df
-        except: pass
-    logger.error(f"❌ {name} failed to load")
+            else:
+                logger.warning(f"⚠️ {name}: Loaded but empty or single column (Shape: {df.shape if not df.empty else 'empty'})")
+        except Exception as e:
+            last_error = str(e)
+            logger.debug(f"  ✗ Failed with sep='{sep}', enc='{enc}': {str(e)[:150]}")
+            continue
+    
+    # If all attempts fail, log detailed error
+    logger.error(f"❌ {name} failed to load with all combinations.")
+    logger.error(f"   Last error: {last_error}")
+    logger.error(f"   URL: {url}")
+    
+    # Try to fetch raw content for debugging
+    try:
+        import requests
+        resp = requests.get(url, timeout=10)
+        logger.error(f"   HTTP Status: {resp.status_code}")
+        logger.error(f"   First 200 chars: {resp.text[:200]}")
+    except Exception as fetch_err:
+        logger.error(f"   Could not fetch URL for debug: {fetch_err}")
+    
     return pd.DataFrame()
 
 def safe_llm_call(prompt, max_tokens=2048):
