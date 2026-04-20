@@ -758,11 +758,12 @@ def main():
                 node_y = [pos[n][1] for n in G.nodes()]
                 node_deg = [G.degree(n) for n in G.nodes()]
                 
+                # FIXED: Only ONE text parameter with hover info
                 fig.add_trace(go.Scatter(
-                    x=node_x, y=node_y, mode='markers+text',
-                    text=[str(n)[:12] for n in G.nodes()], textposition="bottom center",
-                    marker=dict(size=[d*3+8 for d in node_deg], color=node_deg, colorscale='Viridis'),
-                    hoverinfo='text', text=[f"{n}<br>Degree: {G.degree(n)}" for n in G.nodes()]
+                    x=node_x, y=node_y, mode='markers',
+                    marker=dict(size=[d*3+8 for d in node_deg], color=node_deg, colorscale='Viridis', line_width=1, opacity=0.8),
+                    hoverinfo='text',
+                    text=[f"{n}<br>Degree: {G.degree(n)}" for n in G.nodes()]  # ← Only ONE text parameter
                 ))
                 fig.update_layout(title="Account Coordination Network", height=500, plot_bgcolor='white',
                     xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
@@ -780,7 +781,7 @@ def main():
                 st.info("ℹ️ No coordination links detected.")
         else:
             st.info("ℹ️ Upload data to generate network.")
-    
+        
     # === TAB 7: Triggers & Entities WITH LEXICON MANAGEMENT ===
     with tabs[6]:
         st.subheader("🎯 Trigger Terms & Targeted Entities")
