@@ -190,11 +190,21 @@ except Exception as e:
 
 # --- URLs ---
 CFA_LOGO_URL = "https://opportunities.codeforafrica.org/wp-content/uploads/sites/5/2015/11/1-Zq7KnTAeKjBf6eENRsacSQ.png"
-MELTWATER_URL = "https://raw.githubusercontent.com/hanna-tes/Ethiopia-election-monitoring/refs/heads/main/MeltwaterEthiopiaMar8.csv?token=GHSAT0AAAAAADRDAPFL7BRYK6DIX4HFMBUQ2PF6EBQ"
-CIVICSIGNALS_URL = "https://raw.githubusercontent.com/hanna-tes/Ethiopia-election-monitoring/refs/heads/main/EthiopiaCivicsignalMar8.csv?token=GHSAT0AAAAAADRDAPFLHLGT4462WCZI6VWC2PF6APQ"
-TIKTOK_URL = "https://raw.githubusercontent.com/hanna-tes/Ethiopia-election-monitoring/refs/heads/main/EthiopiaTikTokApril.csv?token=GHSAT0AAAAAADRDAPFKFLXKMHU7Y6GFMYXS2PF7K6Q"
-OPENMEASURES_URL = "https://raw.githubusercontent.com/hanna-tes/Ethiopia-election-monitoring/refs/heads/main/EthiopiaopenmeasuresApri17.csv?token=GHSAT0AAAAAADRDAPFLUMOFJ7I22WQ7EJ6S2PF7JPA"
-ORIGINAL_POSTS_URL = "https://raw.githubusercontent.com/hanna-tes/Ethiopia-election-monitoring/refs/heads/main/EthiopiaMeltwaterApril17Original.csv?token=GHSAT0AAAAAADRDAPFL5BVMRMIV3EEAHRLO2PGO3FA"
+
+# Define the data directory path
+DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+
+# Update URL variables to local file paths
+MELTWATER_URL = os.path.join(DATA_DIR, "MeltwaterEthiopiaMar8.csv")
+CIVICSIGNALS_URL = os.path.join(DATA_DIR, "EthiopiaCivicsignalMar8.csv")
+TIKTOK_URL = os.path.join(DATA_DIR, "EthiopiaTikTokApril.csv")
+OPENMEASURES_URL = os.path.join(DATA_DIR, "EthiopiaopenmeasuresApri17.csv")
+ORIGINAL_POSTS_URL = os.path.join(DATA_DIR, "EthiopiaMeltwaterApril17Original1.csv")
+#MELTWATER_URL = "https://raw.githubusercontent.com/hanna-tes/Ethiopia-election-monitoring/refs/heads/main/MeltwaterEthiopiaMar8.csv?token=GHSAT0AAAAAADRDAPFL7BRYK6DIX4HFMBUQ2PF6EBQ"
+#CIVICSIGNALS_URL = "https://raw.githubusercontent.com/hanna-tes/Ethiopia-election-monitoring/refs/heads/main/EthiopiaCivicsignalMar8.csv?token=GHSAT0AAAAAADRDAPFLHLGT4462WCZI6VWC2PF6APQ"
+#TIKTOK_URL = "https://raw.githubusercontent.com/hanna-tes/Ethiopia-election-monitoring/refs/heads/main/EthiopiaTikTokApril.csv?token=GHSAT0AAAAAADRDAPFKFLXKMHU7Y6GFMYXS2PF7K6Q"
+#OPENMEASURES_URL = "https://raw.githubusercontent.com/hanna-tes/Ethiopia-election-monitoring/refs/heads/main/EthiopiaopenmeasuresApri17.csv?token=GHSAT0AAAAAADRDAPFLUMOFJ7I22WQ7EJ6S2PF7JPA"
+#ORIGINAL_POSTS_URL = "https://raw.githubusercontent.com/hanna-tes/Ethiopia-election-monitoring/refs/heads/main/EthiopiaMeltwaterApril17Original.csv?token=GHSAT0AAAAAADRDAPFL5BVMRMIV3EEAHRLO2PGO3FA"
 
 # --- Helper Functions ---
 import requests
@@ -274,88 +284,67 @@ def load_from_github_api(owner, repo, path, branch='main', token=None):
             logger.error("Access denied - check token permissions")
         return None
 
-def load_data_robustly(url, name, default_sep=','):
+def load_data_robustly(source, name, default_sep=','):
     """
-    Load CSV from GitHub private repo using GitHub API + PAT.
-    Falls back to direct URL loading if API fails.
+    Load CSV from local file path with robust encoding/separator handling.
+    
+    Args:
+        source: Local file path (string)
+        name: Dataset name for logging
+        default_sep: Default CSV separator
+    
+    Returns:
+        pd.DataFrame or empty DataFrame if loading fails
     """
-    if not url:
-        logger.warning(f"⚠️ {name}: No URL provided")
+    if not source:
+        logger.warning(f"⚠️ {name}: No source path provided")
         return pd.DataFrame()
     
-    logger.info(f"🔍 {name}: Attempting to load from GitHub...")
+    # Check if it's a local file
+    if not os.path.exists(source):
+        logger.error(f"❌ {name}: File not found at path: {source}")
+        return pd.DataFrame()
     
-    # Get GitHub token from secrets
-    github_token = st.secrets.get("GITHUB_TOKEN", "")
+    logger.info(f"📁 {name}: Loading from local file: {source}")
     
-    # Try GitHub API first (for private repos)
-    if github_token:
-        parsed = parse_github_raw_url(url)
-        if parsed:
-            logger.info(f"📡 {name}: Using GitHub API for {parsed['owner']}/{parsed['repo']}")
-            content = load_from_github_api(
-                owner=parsed['owner'],
-                repo=parsed['repo'],
-                path=parsed['path'],
-                branch=parsed['branch'],
-                token=github_token
-            )
-            
-            if content:
-                # Parse CSV from content with multiple encoding attempts
-                for enc in ['utf-8', 'utf-8-sig', 'latin-1']:
-                    try:
-                        df = pd.read_csv(
-                            io.StringIO(content),
-                            sep=default_sep,
-                            encoding=enc,
-                            low_memory=False,
-                            on_bad_lines='skip'
-                        )
-                        if not df.empty and len(df.columns) > 1:
-                            logger.info(f"✅ {name} loaded via GitHub API (Shape: {df.shape})")
-                            return df
-                    except Exception as e:
-                        logger.debug(f"⚠️ {name} parse failed with {enc}: {str(e)[:100]}")
-                        continue
-                logger.warning(f"⚠️ {name}: Content fetched but CSV parsing failed")
-            else:
-                logger.warning(f"⚠️ {name}: GitHub API returned no content")
-    
-    # Fallback: Try direct URL loading (for public repos or if API fails)
-    logger.info(f"🔄 {name}: Falling back to direct URL loading...")
-    
-    # Remove token from URL for direct loading (GitHub raw URLs work without tokens if public)
-    clean_url = url.split('?token=')[0] if '?token=' in url else url
-    
+    # Try multiple encoding/separator combinations
     attempts = [
         (',', 'utf-8'),
-        (',', 'utf-8-sig'),
-        ('\t', 'utf-8'),
-        (';', 'utf-8'),
-        (',', 'latin-1'),
+        (',', 'utf-8-sig'),  # Handles BOM (Byte Order Mark)
+        ('\t', 'utf-8'),     # Tab-separated
+        (';', 'utf-8'),      # Semicolon-separated (European CSVs)
+        (',', 'latin-1'),    # Fallback for special characters
     ]
     
     for sep, enc in attempts:
         try:
             df = pd.read_csv(
-                clean_url,
+                source,
                 sep=sep,
                 encoding=enc,
                 low_memory=False,
                 on_bad_lines='skip',
-                timeout=30
+                skipinitialspace=True
             )
             if not df.empty and len(df.columns) > 1:
-                logger.info(f"✅ {name} loaded via direct URL (Shape: {df.shape})")
+                logger.info(f"✅ {name} loaded successfully (Sep: '{sep}', Enc: '{enc}', Shape: {df.shape})")
+                logger.info(f"📋 {name} columns: {list(df.columns)[:10]}...")  # Show first 10 columns
                 return df
         except Exception as e:
-            logger.debug(f"⚠️ {name} direct load failed with sep='{sep}', enc='{enc}': {str(e)[:100]}")
+            logger.debug(f"⚠️ {name} failed with sep='{sep}', enc='{enc}': {str(e)[:100]}")
             continue
     
-    logger.error(f"❌ {name} failed to load with all methods.")
+    # If all attempts fail, log error with file preview
+    logger.error(f"❌ {name} failed to load with all combinations.")
+    try:
+        with open(source, 'r', encoding='utf-8', errors='ignore') as f:
+            preview = f.read(500)
+            logger.error(f"🔍 First 500 chars of file: {preview[:200]}...")
+    except:
+        pass
+    
     return pd.DataFrame()
-
+    
 def safe_llm_call(prompt, max_tokens=2048):
     if client is None: return None
     try:
