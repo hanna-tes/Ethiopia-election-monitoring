@@ -194,67 +194,166 @@ MELTWATER_URL = "https://raw.githubusercontent.com/hanna-tes/Ethiopia-election-m
 CIVICSIGNALS_URL = "https://raw.githubusercontent.com/hanna-tes/Ethiopia-election-monitoring/refs/heads/main/EthiopiaCivicsignalMar8.csv?token=GHSAT0AAAAAADRDAPFLHLGT4462WCZI6VWC2PF6APQ"
 TIKTOK_URL = "https://raw.githubusercontent.com/hanna-tes/Ethiopia-election-monitoring/refs/heads/main/EthiopiaTikTokApril.csv?token=GHSAT0AAAAAADRDAPFKFLXKMHU7Y6GFMYXS2PF7K6Q"
 OPENMEASURES_URL = "https://raw.githubusercontent.com/hanna-tes/Ethiopia-election-monitoring/refs/heads/main/EthiopiaopenmeasuresApri17.csv?token=GHSAT0AAAAAADRDAPFLUMOFJ7I22WQ7EJ6S2PF7JPA"
-ORIGINAL_POSTS_URL = "https://raw.githubusercontent.com/hanna-tes/Ethiopia-election-monitoring/refs/heads/main/EthiopiaMeltwaterApril17Original%20-%20Sheet1.csv?token=GHSAT0AAAAAADRDAPFKEGAQGEFNLB5HVP6W2PGKDXA"
+ORIGINAL_POSTS_URL = "https://raw.githubusercontent.com/hanna-tes/Ethiopia-election-monitoring/refs/heads/main/EthiopiaMeltwaterApril17Original.csv?token=GHSAT0AAAAAADRDAPFL5BVMRMIV3EEAHRLO2PGO3FA"
 
 # --- Helper Functions ---
+import requests
+import io
+import re
+from urllib.parse import urlparse, parse_qs, unquote
+
+def parse_github_raw_url(url):
+    """
+    Parse GitHub raw URL to extract owner, repo, branch, and file path.
+    Handles URLs with token parameters.
+    
+    Returns: dict with owner, repo, branch, path, or None if parsing fails
+    """
+    if not url or 'githubusercontent.com' not in url:
+        return None
+    
+    try:
+        # Remove token parameter if present
+        if '?token=' in url:
+            url = url.split('?token=')[0]
+        
+        # Parse URL: https://raw.githubusercontent.com/OWNER/REPO/BRANCH/PATH
+        pattern = r'raw\.githubusercontent\.com/([^/]+)/([^/]+)/([^/]+)/(.+)$'
+        match = re.match(pattern, url)
+        
+        if match:
+            owner, repo, branch, path = match.groups()
+            return {
+                'owner': owner,
+                'repo': repo,
+                'branch': branch,
+                'path': unquote(path.strip())  # Decode URL-encoded characters
+            }
+    except Exception as e:
+        logger.warning(f"Failed to parse GitHub URL: {e}")
+    
+    return None
+
+def load_from_github_api(owner, repo, path, branch='main', token=None):
+    """
+    Load CSV content from private GitHub repo using GitHub Contents API.
+    
+    Args:
+        owner: GitHub username or org
+        repo: Repository name
+        path: File path within repo
+        branch: Branch name (default: 'main')
+        token: GitHub PAT for authentication
+    
+    Returns:
+        str: Raw CSV content, or None if failed
+    """
+    # GitHub Contents API endpoint
+    api_url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}"
+    
+    headers = {
+        'Accept': 'application/vnd.github.v3.raw',  # Get raw file content
+        'User-Agent': 'Ethiopia-Election-Monitor/1.0'
+    }
+    
+    if token:
+        headers['Authorization'] = f'token {token}'
+    
+    # Add branch parameter
+    params = {'ref': branch} if branch else {}
+    
+    try:
+        response = requests.get(api_url, headers=headers, params=params, timeout=30)
+        response.raise_for_status()
+        return response.text
+    except requests.exceptions.RequestException as e:
+        logger.error(f"GitHub API fetch failed for {owner}/{repo}/{path}: {e}")
+        if response.status_code == 404:
+            logger.error(f"File not found: {path}")
+        elif response.status_code == 403:
+            logger.error("Access denied - check token permissions")
+        return None
+
 def load_data_robustly(url, name, default_sep=','):
     """
-    Load CSV from URL with enhanced error logging.
-    Uses your exact logic + better diagnostics.
+    Load CSV from GitHub private repo using GitHub API + PAT.
+    Falls back to direct URL loading if API fails.
     """
-    df = pd.DataFrame()
     if not url:
         logger.warning(f"⚠️ {name}: No URL provided")
-        return df
+        return pd.DataFrame()
     
-    logger.info(f"🔍 {name}: Attempting to load from: {url[:100]}...")
+    logger.info(f"🔍 {name}: Attempting to load from GitHub...")
+    
+    # Get GitHub token from secrets
+    github_token = st.secrets.get("GITHUB_TOKEN", "")
+    
+    # Try GitHub API first (for private repos)
+    if github_token:
+        parsed = parse_github_raw_url(url)
+        if parsed:
+            logger.info(f"📡 {name}: Using GitHub API for {parsed['owner']}/{parsed['repo']}")
+            content = load_from_github_api(
+                owner=parsed['owner'],
+                repo=parsed['repo'],
+                path=parsed['path'],
+                branch=parsed['branch'],
+                token=github_token
+            )
+            
+            if content:
+                # Parse CSV from content with multiple encoding attempts
+                for enc in ['utf-8', 'utf-8-sig', 'latin-1']:
+                    try:
+                        df = pd.read_csv(
+                            io.StringIO(content),
+                            sep=default_sep,
+                            encoding=enc,
+                            low_memory=False,
+                            on_bad_lines='skip'
+                        )
+                        if not df.empty and len(df.columns) > 1:
+                            logger.info(f"✅ {name} loaded via GitHub API (Shape: {df.shape})")
+                            return df
+                    except Exception as e:
+                        logger.debug(f"⚠️ {name} parse failed with {enc}: {str(e)[:100]}")
+                        continue
+                logger.warning(f"⚠️ {name}: Content fetched but CSV parsing failed")
+            else:
+                logger.warning(f"⚠️ {name}: GitHub API returned no content")
+    
+    # Fallback: Try direct URL loading (for public repos or if API fails)
+    logger.info(f"🔄 {name}: Falling back to direct URL loading...")
+    
+    # Remove token from URL for direct loading (GitHub raw URLs work without tokens if public)
+    clean_url = url.split('?token=')[0] if '?token=' in url else url
     
     attempts = [
         (',', 'utf-8'),
         (',', 'utf-8-sig'),
         ('\t', 'utf-8'),
         (';', 'utf-8'),
-        ('\t', 'utf-16'),
         (',', 'latin-1'),
     ]
     
-    last_error = None
     for sep, enc in attempts:
         try:
-            logger.debug(f"  → Trying sep='{sep}', enc='{enc}'...")
             df = pd.read_csv(
-                url, 
-                sep=sep, 
-                low_memory=False, 
-                on_bad_lines='skip', 
+                clean_url,
+                sep=sep,
                 encoding=enc,
-                timeout=30  # Add timeout to prevent hanging
+                low_memory=False,
+                on_bad_lines='skip',
+                timeout=30
             )
             if not df.empty and len(df.columns) > 1:
-                logger.info(f"✅ {name} loaded successfully (Sep: '{sep}', Enc: '{enc}', Shape: {df.shape})")
-                logger.info(f"📋 {name} columns: {list(df.columns)}")
+                logger.info(f"✅ {name} loaded via direct URL (Shape: {df.shape})")
                 return df
-            else:
-                logger.warning(f"⚠️ {name}: Loaded but empty or single column (Shape: {df.shape if not df.empty else 'empty'})")
         except Exception as e:
-            last_error = str(e)
-            logger.debug(f"  ✗ Failed with sep='{sep}', enc='{enc}': {str(e)[:150]}")
+            logger.debug(f"⚠️ {name} direct load failed with sep='{sep}', enc='{enc}': {str(e)[:100]}")
             continue
     
-    # If all attempts fail, log detailed error
-    logger.error(f"❌ {name} failed to load with all combinations.")
-    logger.error(f"   Last error: {last_error}")
-    logger.error(f"   URL: {url}")
-    
-    # Try to fetch raw content for debugging
-    try:
-        import requests
-        resp = requests.get(url, timeout=10)
-        logger.error(f"   HTTP Status: {resp.status_code}")
-        logger.error(f"   First 200 chars: {resp.text[:200]}")
-    except Exception as fetch_err:
-        logger.error(f"   Could not fetch URL for debug: {fetch_err}")
-    
+    logger.error(f"❌ {name} failed to load with all methods.")
     return pd.DataFrame()
 
 def safe_llm_call(prompt, max_tokens=2048):
@@ -625,6 +724,50 @@ def wordcloud_to_base64(wordcloud_obj):
     wordcloud_obj.to_image().save(img_buffer, format='PNG')
     img_buffer.seek(0)
     return base64.b64encode(img_buffer.getvalue()).decode()
+    
+def extract_targeted_entities(df, text_col='original_text', account_col='account_id'):
+    """Extract potential PEPs/entities from Ethiopia election context"""
+    if df.empty or text_col not in df.columns:
+        return pd.DataFrame()
+    
+    entity_patterns = [
+        r'\b(Abiy\s+Ahmed|Prosperity\s+Party|FANO|NEBE|National\s+Election\s+Board)\b',
+        r'\b(Amhara|Tigray|Oromo|Somali|Afar|Sidama)\b',
+        r'\b([A-Z][a-z]+\s+(Region|Zone|Woreda|Council))\b',
+        r'[\u1200-\u137F]{3,}(?:\s+[\u1200-\u137F]{2,}){0,2}',
+    ]
+    
+    entities = []
+    for _, row in df.iterrows():
+        text = str(row.get(text_col, ''))
+        account = str(row.get(account_col, ''))
+        
+        for pattern in entity_patterns:
+            candidates = re.findall(pattern, text, re.IGNORECASE)
+            for candidate in candidates:
+                if isinstance(candidate, tuple):
+                    candidate = ' '.join(candidate)
+                if len(candidate.strip()) >= 3:
+                    entities.append({
+                        "entity": candidate.strip(),
+                        "mentioned_by": account,
+                        "platform": row.get('Platform', 'Unknown'),
+                        "timestamp": row.get('timestamp_share'),
+                        "context": text[:200]
+                    })
+    
+    if not entities:
+        return pd.DataFrame()
+    
+    entity_df = pd.DataFrame(entities)
+    aggregated = entity_df.groupby('entity').agg({
+        'mentioned_by': lambda x: list(set(x)),
+        'platform': lambda x: list(set(x)),
+        'timestamp': 'min',
+        'context': 'first'
+    }).reset_index()
+    aggregated['mention_count'] = entity_df.groupby('entity').size().values
+    return aggregated.sort_values('mention_count', ascending=False)
 
 # --- Professional UI Theme ---
 def inject_custom_css():
