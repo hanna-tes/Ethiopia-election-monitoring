@@ -509,44 +509,73 @@ def assign_virality_tier(n):
         
 # --- Summarize Cluster (Ethiopia-Specific LLM Intelligence Report) ---
 def summarize_cluster_ethiopia(texts, urls, cluster_data, min_ts, max_ts):
-    joined = "\n".join(texts[:50])
-    url_context = "\nRelevant post links:\n" + "\n".join(urls[:5]) if urls else ""
+    """
+    Generate a STRICT summary using ONLY content explicitly present in texts.
+    NO fabrication of accounts, URLs, engagement metrics, or claims.
+    """
+    # ✅ Use MORE texts for better context (adjust based on your token budget)
+    # Using 80 texts gives good coverage without hitting typical limits
+    sample_texts = texts[:80]
+    joined = "\n---\n".join([f"[{i+1}] {t}" for i, t in enumerate(sample_texts)])
+    
+    # Only include REAL URLs from the dataset (max 10 for reference)
+    real_urls = [u for u in urls if u and u.startswith('http')][:10]
+    url_context = "\nReal source links from dataset:\n" + "\n".join(real_urls) if real_urls else ""
+    
     prompt = f"""
-Generate a structured intelligence report on online narratives related to the election in Ethiopia.
-Focus on pre and post-election tensions and emerging narratives, including:
-- Ethnic/identity-based tensions (Amhara, Oromo, Tigrayan, Somali, Afar, Sidama, etc.)
-- Political party dynamics (Prosperity Party, Fano, OLA/ONEG, TPLF, NEBE)
-- Electoral integrity (fraud allegations, voter suppression, NEBE bias, tally center issues)
-- Violence, incitement, or hate speech (including Amharic/English trigger terms)
-- Foreign interference or geopolitical narratives (Egypt, Sudan, Eritrea, US, China)
-- Calls for protests, boycotts, or civic resistance
-- Viral slogans, hashtags, or coordinated messaging
-**Strict Instructions:**
-- Only report claims **explicitly present** in the provided posts.
-- Identify **originators**: accounts that first posted the core claim (from cluster_data).
-- Note **amplification**: how widely it spread (Total posts).
-- Do NOT invent, cut out, assume, or fact-check.
-- Summarize clearly and concisely.
-**Output Format:**
-Narrative Title: [Short, descriptive title]
-Core Claim(s): [Bullet points]
-Originator(s): [Account IDs or "Unknown"]
-Amplification: [Total posts in cluster]
-First Detected: {min_ts}
-Last Updated: {max_ts}
-Documents:
-{joined}{url_context}
-"""    
-    response = safe_llm_call(prompt, max_tokens=2048)
-    if not response:
-        return "⚠️ No summary generated (LLM unavailable or rate limited)."
-        
-    # Clean LLM output
-    cleaned = re.sub(r'\*\*.*?Instructions.*?\*\*', '', response, flags=re.IGNORECASE | re.DOTALL)
-    cleaned = re.sub(r'```.*?```', '', cleaned, flags=re.DOTALL)
-    cleaned = re.sub(r'###|##|#', '', cleaned)
-    return cleaned.strip()
+You are an intelligence analyst reviewing social media posts about the Ethiopia election.
+Your task is to summarize ONLY what is explicitly stated in the provided posts.
 
+**STRICT RULES - DO NOT VIOLATE:**
+1. Use ONLY the exact text content provided below. Do NOT invent, assume, or extrapolate.
+2. Do NOT create fake account names, URLs, engagement metrics, or timestamps.
+3. Do NOT mention specific likes/retweets/views unless explicitly present in the text.
+4. If a claim is not directly stated in the provided texts, DO NOT include it.
+5. If you cannot find evidence for a category, write "Not explicitly stated in provided posts."
+
+**Provided Posts (verbatim from dataset, {len(sample_texts)} samples shown):**
+{joined}
+
+**Real Source Links (from dataset, for reference only):**
+{url_context}
+
+**Time Range:** {min_ts} to {max_ts}
+
+**Output Format (use simple text, no markdown headers):**
+NARRATIVE THEME: [One short phrase summarizing the dominant topic]
+
+EXPLICIT CLAIMS (quote or closely paraphrase from posts above):
+- [Claim 1, with brief context]
+- [Claim 2, with brief context]
+- [etc.]
+
+TARGETED GROUPS/ENTITIES (only if explicitly named in posts):
+- [Group/entity 1]
+- [Group/entity 2]
+
+LANGUAGE/TONE OBSERVED: [e.g., accusatory, urgent, informational, etc.]
+
+SAMPLE QUOTES (exact phrases from provided posts, max 5):
+1. "[exact quote 1]"
+2. "[exact quote 2]"
+3. "[exact quote 3]"
+
+DO NOT include: fake accounts, fake URLs, engagement metrics, or claims not in the provided texts.
+"""
+    
+    # ✅ Use higher max_tokens since you have capacity
+    response = safe_llm_call(prompt, max_tokens=2048)
+    
+    if not response:
+        # Fallback: show raw sample of posts instead of fake summary
+        return f"⚠️ Summary generation failed. Sample posts from cluster:\n" + "\n".join(sample_texts[:10])
+    
+    # Clean output but preserve strictness
+    cleaned = re.sub(r'\*\*.*?\*\*', '', response)  # Remove bold markers
+    cleaned = re.sub(r'```.*?```', '', cleaned, flags=re.DOTALL)  # Remove code blocks
+    cleaned = re.sub(r'^[\s\-#*]+|[\s\-#*]+$', '', cleaned, flags=re.MULTILINE)  # Trim markdown
+    return cleaned.strip()
+    
 def get_ethiopia_summaries(df_clustered_all, filtered_df):
     """Generates LLM-powered summaries for top narrative clusters"""
     if df_clustered_all.empty or 'cluster' not in df_clustered_all.columns:
