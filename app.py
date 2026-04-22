@@ -1500,6 +1500,29 @@ def main():
             st.info("ℹ️ No narrative summaries generated. Check data volume or LLM API status.")
         else:
             for summary in sorted(all_summaries, key=lambda x: x['Total_Reach'], reverse=True):
+                # ✅ FIX 1: Skip clusters with no meaningful content
+                context = summary.get('Context', '').lower()
+                if any(phrase in context for phrase in [
+                    "no explicit claims", 
+                    "not explicitly stated", 
+                    "this account doesn't exist", 
+                    "no additional information",
+                    "summary generation failed",
+                    "no evidence for",
+                    "accounts do not exist",
+                    "none"  # Catch sections that just say "None"
+                ]):
+                    continue  # Skip this cluster entirely
+                
+                # Also skip if all key sections appear empty
+                if all(empty_phrase in context for empty_phrase in [
+                    "explicit claims: none",
+                    "targeted groups: none", 
+                    "language/tone: none",
+                    "sample quotes: none"
+                ]):
+                    continue
+                
                 st.markdown(f"### Cluster #{summary['cluster_id']} — {summary['Emerging Virality']}")
                 
                 # Metrics row
@@ -1508,9 +1531,31 @@ def main():
                 m2.metric("Amplifiers", f"{summary['Amplifiers_Count']:,}")
                 m3.caption(f"Platforms: {summary['Top_Platforms']}")
                 
-                # ✅ SHOW LLM-GENERATED NARRATIVE REPORT
-                st.markdown("**Narrative Intelligence Report:**")
-                st.write(summary['Context'])
+                # ✅ FIX 2: Format summary with proper line breaks
+                st.markdown("**📋 Narrative Intelligence Report**")
+                
+                # Split context by common section headers and add proper formatting
+                formatted_context = summary['Context']
+                
+                # Add markdown formatting to section headers for better display
+                section_headers = [
+                    'NARRATIVE THEME:', 'EXPLICIT CLAIMS:', 'TARGETED GROUPS/ENTITIES:', 
+                    'LANGUAGE/TONE OBSERVED:', 'SAMPLE QUOTES:', 'Key Findings:', 
+                    'Viral Slogans:', 'Foreign Interference:', 'Calls for Protests:'
+                ]
+                
+                for header in section_headers:
+                    # Add bold + emoji formatting to headers, ensure they start on new line
+                    formatted_context = formatted_context.replace(
+                        header, 
+                        f"\n\n**{header}**\n"
+                    )
+                
+                # Ensure bullet points display properly
+                formatted_context = formatted_context.replace('- [', '- [').replace('\n-', '\n- ')
+                
+                # Display with proper whitespace
+                st.markdown(formatted_context.strip())
                 
                 # Originators
                 if summary['Originators'] != "Unknown":
@@ -1528,7 +1573,7 @@ def main():
                         column_config={"URL": st.column_config.LinkColumn("Link", display_text="🔗 View")}
                     )
                 st.divider()
-    
+            
     # === TAB 6: Network & Coordination Intelligence ===
     with tabs[5]:
         st.subheader("🕸️ Account Coordination Network")
