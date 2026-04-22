@@ -200,11 +200,11 @@ CFA_LOGO_URL = "https://opportunities.codeforafrica.org/wp-content/uploads/sites
 #TIKTOK_URL = os.path.join(DATA_DIR, "EthiopiaTikTokApril.csv")
 #OPENMEASURES_URL = os.path.join(DATA_DIR, "EthiopiaopenmeasuresApri17.csv")
 #ORIGINAL_POSTS_URL = os.path.join(DATA_DIR, "EthiopiaMeltwaterApril17Original1.csv")
-MELTWATER_URL = "https://raw.githubusercontent.com/hanna-tes/Ethiopia-election-monitoring/main/MeltwaterEthiopiaMar8.csv"
-CIVICSIGNALS_URL = "https://raw.githubusercontent.com/hanna-tes/Ethiopia-election-monitoring/main/EthiopiaCivicsignalMar8.csv"
-TIKTOK_URL = "https://raw.githubusercontent.com/hanna-tes/Ethiopia-election-monitoring/main/EthiopiaTikTokApril.csv"
-OPENMEASURES_URL = "https://raw.githubusercontent.com/hanna-tes/Ethiopia-election-monitoring/main/EthiopiaopenmeasuresApri17.csv"
-ORIGINAL_POSTS_URL = "https://raw.githubusercontent.com/hanna-tes/Ethiopia-election-monitoring/main/EthiopiaMeltwaterApril17Original.csv"
+MELTWATER_URL = "https://raw.githubusercontent.com/hanna-tes/Ethiopia-election-monitoring/refs/heads/main/MeltwaterEthiopiaMar8.csv"
+CIVICSIGNALS_URL = "https://raw.githubusercontent.com/hanna-tes/Ethiopia-election-monitoring/refs/heads/main/EthiopiaCivicsignalMar8.csv"
+TIKTOK_URL = "https://raw.githubusercontent.com/hanna-tes/Ethiopia-election-monitoring/refs/heads/main/EthiopiaTikTokApril.csv"
+OPENMEASURES_URL = "https://raw.githubusercontent.com/hanna-tes/Ethiopia-election-monitoring/refs/heads/main/EthiopiaopenmeasuresApri17.csv"
+ORIGINAL_POSTS_URL = "https://raw.githubusercontent.com/hanna-tes/Ethiopia-election-monitoring/refs/heads/main/EthiopiaMeltwaterApril17Original.csv"
 
 # --- Helper Functions ---
 import requests
@@ -284,65 +284,66 @@ def load_from_github_api(owner, repo, path, branch='main', token=None):
             logger.error("Access denied - check token permissions")
         return None
 
-def load_data_robustly(source, name, default_sep=','):
-    """
-    Load CSV from local file path with robust encoding/separator handling.
+def load_data_robustly(url, name, default_sep=','):
+    """Load CSV from URL or local path with detailed error reporting"""
+    import requests
     
-    Args:
-        source: Local file path (string)
-        name: Dataset name for logging
-        default_sep: Default CSV separator
+    df = pd.DataFrame()
+    if not url:
+        logger.warning(f"⚠️ {name}: No URL/path provided")
+        return df
     
-    Returns:
-        pd.DataFrame or empty DataFrame if loading fails
-    """
-    if not source:
-        logger.warning(f"⚠️ {name}: No source path provided")
-        return pd.DataFrame()
+    # First, test URL accessibility with requests
+    if url.startswith('http'):
+        try:
+            response = requests.head(url, timeout=15, allow_redirects=True)
+            if response.status_code != 200:
+                logger.error(f"❌ {name}: HTTP {response.status_code} for {url[:100]}...")
+                # Try GET as fallback (some servers block HEAD)
+                response = requests.get(url, timeout=15)
+                if response.status_code != 200:
+                    logger.error(f"❌ {name}: GET also failed with {response.status_code}")
+                    return pd.DataFrame()
+            logger.info(f"✅ {name}: URL accessible ({response.status_code})")
+        except requests.exceptions.SSLError as e:
+            logger.error(f"❌ {name}: SSL error - {e}")
+            return pd.DataFrame()
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"❌ {name}: Connection error - {e}")
+            return pd.DataFrame()
+        except Exception as e:
+            logger.warning(f"⚠️ {name}: URL check failed (continuing anyway) - {e}")
     
-    # Check if it's a local file
-    if not os.path.exists(source):
-        logger.error(f"❌ {name}: File not found at path: {source}")
-        return pd.DataFrame()
-    
-    logger.info(f"📁 {name}: Loading from local file: {source}")
-    
-    # Try multiple encoding/separator combinations
+    # Try loading with pandas
     attempts = [
         (',', 'utf-8'),
-        (',', 'utf-8-sig'),  # Handles BOM (Byte Order Mark)
-        ('\t', 'utf-8'),     # Tab-separated
-        (';', 'utf-8'),      # Semicolon-separated (European CSVs)
-        (',', 'latin-1'),    # Fallback for special characters
+        (',', 'utf-8-sig'),
+        ('\t', 'utf-8'),
+        (';', 'utf-8'),
+        (',', 'latin-1'),
     ]
     
+    last_error = None
     for sep, enc in attempts:
         try:
             df = pd.read_csv(
-                source,
-                sep=sep,
+                url, 
+                sep=sep, 
                 encoding=enc,
-                low_memory=False,
+                low_memory=False, 
                 on_bad_lines='skip',
-                skipinitialspace=True
+                engine='python'  # More forgiving parser for URLs
             )
             if not df.empty and len(df.columns) > 1:
-                logger.info(f"✅ {name} loaded successfully (Sep: '{sep}', Enc: '{enc}', Shape: {df.shape})")
-                logger.info(f"📋 {name} columns: {list(df.columns)[:10]}...")  # Show first 10 columns
+                logger.info(f"✅ {name} loaded (Sep: '{sep}', Enc: '{enc}', Shape: {df.shape})")
                 return df
         except Exception as e:
-            logger.debug(f"⚠️ {name} failed with sep='{sep}', enc='{enc}': {str(e)[:100]}")
-            continue
+            last_error = str(e)
+            logger.debug(f"⚠️ {name} attempt failed (sep='{sep}', enc='{enc}'): {type(e).__name__}")
     
-    # If all attempts fail, log error with file preview
-    logger.error(f"❌ {name} failed to load with all combinations.")
-    try:
-        with open(source, 'r', encoding='utf-8', errors='ignore') as f:
-            preview = f.read(500)
-            logger.error(f"🔍 First 500 chars of file: {preview[:200]}...")
-    except:
-        pass
-    
+    # If all attempts fail, log the actual error
+    logger.error(f"❌ {name} failed to load. Last error: {last_error}")
+    logger.error(f"   URL: {url[:150]}...")
     return pd.DataFrame()
     
 def safe_llm_call(prompt, max_tokens=2048):
