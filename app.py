@@ -1144,6 +1144,29 @@ def inject_custom_css():
         ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
     </style>
     """, unsafe_allow_html=True)
+
+# DEBUG: Validate URLs before loading
+def validate_url(url, name):
+    if url.startswith('http'):
+        try:
+            import requests
+            r = requests.head(url, timeout=10, allow_redirects=True)
+            if r.status_code == 200:
+                logger.info(f"✅ {name} URL valid ({r.status_code})")
+                return True
+            else:
+                logger.error(f"❌ {name} URL returned {r.status_code}: {url[:100]}...")
+                return False
+        except Exception as e:
+            logger.error(f"❌ {name} URL check failed: {e}")
+            return False
+    return True  # Local paths assumed valid
+
+# Run validation
+for name, url in [("Meltwater", MELTWATER_URL), ("Civicsignal", CIVICSIGNALS_URL), 
+                  ("TikTok", TIKTOK_URL), ("OpenMeasure", OPENMEASURES_URL),
+                  ("OriginalPosts", ORIGINAL_POSTS_URL)]:
+    validate_url(url, name)
     
 # --- Main App ---
 def main():
