@@ -1110,7 +1110,14 @@ def main():
     if combined_raw.empty:
         st.error("❌ No data loaded. Please check URLs or upload files manually.")
         st.stop()
-    
+        
+    st.sidebar.markdown("### Data Sources (Raw Count)")
+    source_counts = combined_raw['source_dataset'].value_counts()
+    st.sidebar.dataframe(
+        source_counts.reset_index().rename(columns={'index':'Source', 'source_dataset':'Posts'}), 
+        width='stretch',  # ✅ Updated from use_container_width
+        hide_index=True
+    )
     # Preprocess
     df_full = final_preprocess_and_map_columns(combined_raw)
     df_full['timestamp_share'] = df_full['timestamp_share'].apply(parse_timestamp_robust)
@@ -1141,6 +1148,16 @@ def main():
         (df_original_only['timestamp_share'] < end_date)
     ].copy()
 
+    # Side bar
+    st.sidebar.markdown("### Platform Breakdown (Filtered Count)")
+    st.sidebar.markdown(f"**Total Posts (Main Dataset):** {len(filtered_df):,}")
+    st.sidebar.markdown(f"**Original Posts (Coordination Analysis):** {len(filtered_original):,}")
+    platform_counts_filtered = filtered_df['Platform'].value_counts()
+    st.sidebar.dataframe(
+        platform_counts_filtered.reset_index().rename(columns={'index':'Platform', 'Platform':'Posts'}),
+        width='stretch',  
+        hide_index=True
+    )
     # Clustering
     df_clustered = cached_clustering(filtered_df, eps=0.3, min_samples=2, max_features=5000) if not filtered_df.empty else pd.DataFrame()
 
@@ -1230,10 +1247,23 @@ def main():
                     'Count': sizes.values, 
                     'Virality': [assign_virality_tier(c) for c in sizes.values]
                 })
-                fig = px.bar(risk_df.nlargest(10, 'Count'), x='Cluster', y='Count', color='Virality', title="Top Clusters by Volume")
+                # Add explicit color mapping to prevent KeyError
+                fig = px.bar(
+                    risk_df.nlargest(10, 'Count'), 
+                    x='Cluster', 
+                    y='Count', 
+                    color='Virality', 
+                    title="Top Clusters by Volume",
+                    color_discrete_map={  # ← This prevents the KeyError
+                        "Tier 1: Limited": "#94a3b8",
+                        "Tier 2: Moderate": "#3b82f6", 
+                        "Tier 3: High Spread": "#f59e0b",
+                        "Tier 4: Viral Emergency": "#dc2626"
+                    }
+                )
                 st.plotly_chart(fig, width='stretch')
-                st.dataframe(risk_df.nlargest(10, 'Count'), use_container_width=True)
-    
+                st.dataframe(risk_df.nlargest(10, 'Count'), width='stretch')
+            
     # === TAB 5: Narratives ===
     with tabs[4]:
         st.markdown("### 📰 Trending Narratives")
@@ -1565,14 +1595,6 @@ def main():
                 ```
                 """)
     
-    # Sidebar
-    with st.sidebar:
-        st.markdown("### 📥 Export Data")
-        if not filtered_df.empty:
-            st.download_button("Download Filtered CSV", convert_df_to_csv(filtered_df), "ethiopia_data.csv", "text/csv")
-        st.markdown("---")
-        st.markdown("### ℹ️ About")
-        st.caption("Ethiopia Election Monitor v1.2\n\nLexicon management • Amharic support • Word cloud visualization\n\nBuilt with Streamlit • Code for Africa")
-
+   
 if __name__ == "__main__":
     main()
