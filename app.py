@@ -1441,21 +1441,27 @@ def main():
                 if risk_df.empty:
                     st.info("ℹ️ No valid risk data after filtering")
                 else:
-                    # ✅ Use Plotly's built-in color sequence instead of manual map
+                    # ✅ SIMPLEST FIX: Color by numeric Count, not categorical Virality string
                     fig = px.bar(
                         risk_df.nlargest(10, 'Count'), 
                         x='Cluster', 
-                        y='Count', 
-                        color='Virality', 
-                        title="Top Clusters by Volume",
-                        color_discrete_sequence=px.colors.qualitative.Set2  # ✅ Built-in palette avoids KeyError
+                        y='Count',
+                        color='Count',  # ✅ Color by numeric value (avoids KeyError)
+                        color_continuous_scale='Reds',  # ✅ Built-in continuous scale
+                        title="Top Clusters by Volume"
                     )
                     st.plotly_chart(fig, width='stretch')
-                    st.dataframe(risk_df.nlargest(10, 'Count'), width='stretch')
+                    
+                    # ✅ Show virality tier in the table below
+                    st.dataframe(
+                        risk_df.nlargest(10, 'Count')[['Cluster', 'Count', 'Virality']], 
+                        width='stretch',
+                        hide_index=True
+                    )
             else:
                 st.info("ℹ️ No cluster data available for risk assessment")
         else:
-            st.info("ℹ️ No clustering data available")
+            st.info("ℹ️ No clustering data available")      
             
     # === TAB 5: Narratives ===
     with tabs[4]:
