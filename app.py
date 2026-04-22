@@ -285,67 +285,72 @@ def load_from_github_api(owner, repo, path, branch='main', token=None):
         return None
 
 def load_data_robustly(url, name, default_sep=','):
-    """Load CSV from URL or local path with detailed error reporting"""
+    """Load CSV from URL or local path with pandas version compatibility"""
     import requests
+    from io import StringIO
     
     df = pd.DataFrame()
     if not url:
         logger.warning(f"⚠️ {name}: No URL/path provided")
         return df
     
-    # First, test URL accessibility with requests
-    if url.startswith('http'):
-        try:
-            response = requests.head(url, timeout=15, allow_redirects=True)
-            if response.status_code != 200:
-                logger.error(f"❌ {name}: HTTP {response.status_code} for {url[:100]}...")
-                # Try GET as fallback (some servers block HEAD)
-                response = requests.get(url, timeout=15)
-                if response.status_code != 200:
-                    logger.error(f"❌ {name}: GET also failed with {response.status_code}")
-                    return pd.DataFrame()
-            logger.info(f"✅ {name}: URL accessible ({response.status_code})")
-        except requests.exceptions.SSLError as e:
-            logger.error(f"❌ {name}: SSL error - {e}")
-            return pd.DataFrame()
-        except requests.exceptions.ConnectionError as e:
-            logger.error(f"❌ {name}: Connection error - {e}")
-            return pd.DataFrame()
-        except Exception as e:
-            logger.warning(f"⚠️ {name}: URL check failed (continuing anyway) - {e}")
+    # --- Handle local files ---
+    if not url.startswith('http'):
+        if os.path.exists(url):
+            try:
+                return pd.read_csv(url, sep=default_sep, low_memory=False, on_bad_lines='skip')
+            except Exception as e:
+                logger.error(f"❌ {name} local load failed: {e}")
+                return pd.DataFrame()
+        logger.error(f"❌ {name}: Local file not found: {url}")
+        return pd.DataFrame()
     
-    # Try loading with pandas
-    attempts = [
-        (',', 'utf-8'),
-        (',', 'utf-8-sig'),
-        ('\t', 'utf-8'),
-        (';', 'utf-8'),
-        (',', 'latin-1'),
-    ]
-    
-    last_error = None
-    for sep, enc in attempts:
-        try:
-            df = pd.read_csv(
-                url, 
-                sep=sep, 
-                encoding=enc,
-                low_memory=False, 
-                on_bad_lines='skip',
-                engine='python'  # More forgiving parser for URLs
-            )
-            if not df.empty and len(df.columns) > 1:
-                logger.info(f"✅ {name} loaded (Sep: '{sep}', Enc: '{enc}', Shape: {df.shape})")
-                return df
-        except Exception as e:
-            last_error = str(e)
-            logger.debug(f"⚠️ {name} attempt failed (sep='{sep}', enc='{enc}'): {type(e).__name__}")
-    
-    # If all attempts fail, log the actual error
-    logger.error(f"❌ {name} failed to load. Last error: {last_error}")
-    logger.error(f"   URL: {url[:150]}...")
-    return pd.DataFrame()
-    
+    # --- Handle URLs ---
+    try:
+        # Fetch content via requests (more reliable than pandas direct URL)
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+        content = response.text
+        
+        # Try parsing with multiple encodings/separators
+        # NOTE: Use default 'c' engine with low_memory=False (pandas ≥2.0 compatible)
+        attempts = [
+            (',', 'utf-8'),
+            (',', 'utf-8-sig'),  # Handles BOM
+            ('\t', 'utf-8'),      # Tab-separated
+            (';', 'utf-8'),       # European CSVs
+            (',', 'latin-1'),     # Fallback encoding
+        ]
+        
+        for sep, enc in attempts:
+            try:
+                df = pd.read_csv(
+                    StringIO(content), 
+                    sep=sep, 
+                    encoding=enc,
+                    low_memory=False,      # ✅ Works with default 'c' engine
+                    on_bad_lines='skip',
+                    # ❌ REMOVED: engine='python' (incompatible with low_memory in pandas ≥2.0)
+                )
+                if not df.empty and len(df.columns) > 1:
+                    logger.info(f"✅ {name} loaded (Sep: '{sep}', Enc: '{enc}', Shape: {df.shape})")
+                    return df
+            except pd.errors.ParserError as e:
+                logger.debug(f"⚠️ {name} parse failed (sep='{sep}', enc='{enc}'): {e}")
+                continue
+            except UnicodeDecodeError:
+                continue  # Try next encoding
+                
+        logger.error(f"❌ {name}: Could not parse CSV content after all attempts")
+        return pd.DataFrame()
+        
+    except requests.exceptions.RequestException as e:
+        logger.error(f"❌ {name}: Failed to fetch URL - {e}")
+        return pd.DataFrame()
+    except Exception as e:
+        logger.error(f"❌ {name}: Unexpected error - {type(e).__name__}: {e}")
+        return pd.DataFrame()
+        
 def safe_llm_call(prompt, max_tokens=2048):
     if client is None: return None
     try:
