@@ -1577,78 +1577,193 @@ def main():
     # === TAB 6: Network & Coordination Intelligence ===
     with tabs[5]:
         st.subheader("🕸️ Account Coordination Network")
-        st.caption("Nodes = accounts | Edges = shared identical messages | Size = number of shared messages")
+        st.caption("Visualizing accounts sharing identical messages. Node size = influence, edge thickness = coordination strength.")
         
-        if not df_clustered.empty and 'cluster' in df_clustered.columns:
-            # Build graph from coordination groups (exact matches only)
+        # ✅ Controls for better exploration
+        col1, col2, col3 = st.columns([3, 2, 2])
+        with col1:
+            min_connections = st.slider("🔗 Minimum connections to show", min_value=1, max_value=10, value=2)
+        with col2:
+            top_n_nodes = st.slider("👥 Show top N accounts", min_value=10, max_value=100, value=50, step=10)
+        with col3:
+            layout_type = st.selectbox("🗺️ Layout style", ["spring", "circular", "kamada_kawai", "shell"], index=0)
+        
+        if not df_clustered.empty and 'cluster' in df_clustered.columns and not filtered_original.empty:
+            # Build coordination graph from EXACT matches in original posts only
             G = nx.Graph()
-            for cid, group in df_clustered[df_clustered['cluster'] != -1].groupby('cluster'):
+            
+            # Group by exact text to find coordination
+            exact_matches = filtered_original.groupby('original_text').filter(lambda x: len(x) >= 2)
+            
+            for text, group in exact_matches.groupby('original_text'):
                 accounts = group['account_id'].dropna().unique()
-                if len(accounts) > 1:
-                    # Add edges between all accounts in the same cluster
+                if len(accounts) >= 2:
+                    # Add edges between all accounts sharing this exact text
                     for i in range(len(accounts)):
                         for j in range(i+1, len(accounts)):
-                            G.add_edge(accounts[i], accounts[j], weight=1)
+                            # Weight = number of shared identical messages
+                            current_weight = G.get_edge_data(accounts[i], accounts[j], {}).get('weight', 0)
+                            G.add_edge(accounts[i], accounts[j], weight=current_weight + 1)
+            
+            # Filter to nodes with minimum connections
+            G = G.copy()
+            nodes_to_keep = [n for n, d in G.degree() if d >= min_connections]
+            G = G.subgraph(nodes_to_keep).copy()
             
             if G.number_of_edges() > 0:
-                # Use spring layout with better spacing
-                pos = nx.spring_layout(G, k=0.5, iterations=50, seed=42)
+                # ✅ Get top N nodes by degree (influence)
+                top_nodes = sorted(G.degree(), key=lambda x: x[1], reverse=True)[:top_n_nodes]
+                top_node_names = [n for n, _ in top_nodes]
+                G_top = G.subgraph(top_node_names).copy()
                 
-                # Create node trace with visible labels
-                node_x = [pos[n][0] for n in G.nodes()]
-                node_y = [pos[n][1] for n in G.nodes()]
-                node_text = [f"{n}<br>Degree: {G.degree(n)}" for n in G.nodes()]
-                node_size = [G.degree(n)*3 + 10 for n in G.nodes()]  # Scale by degree
+                # ✅ Choose layout algorithm
+                if layout_type == "spring":
+                    pos = nx.spring_layout(G_top, k=0.8, iterations=50, seed=42)
+                elif layout_type == "circular":
+                    pos = nx.circular_layout(G_top)
+                elif layout_type == "kamada_kawai":
+                    pos = nx.kamada_kawai_layout(G_top)
+                else:  # shell
+                    pos = nx.shell_layout(G_top)
                 
+                # ✅ Prepare node data with platform info and metrics
+                node_data = []
+                for node in G_top.nodes():
+                    # Get platform from original dataset
+                    platform = filtered_original[filtered_original['account_id'] == node]['Platform'].mode()
+                    platform = platform.iloc[0] if not platform.empty else "Unknown"
+                    
+                    node_data.append({
+                        'account': node,
+                        'degree': G_top.degree(node),
+                        'platform': platform,
+                        'x': pos[node][0],
+                        'y': pos[node][1]
+                    })
+                
+                node_df = pd.DataFrame(node_data)
+                
+                # ✅ Color nodes by platform for easy identification
+                platform_colors = {
+                    'X': '#1DA1F2', 'Facebook': '#1877F2', 'TikTok': '#000000', 
+                    'Telegram': '#0088cc', 'Media': '#6B7280', 'Unknown': '#9CA3AF'
+                }
+                node_df['color'] = node_df['platform'].map(lambda p: platform_colors.get(p, '#9CA3AF'))
+                
+                # ✅ Prepare edge data with thickness based on weight
+                edge_data = []
+                for u, v, data in G_top.edges(data=True):
+                    weight = data.get('weight', 1)
+                    edge_data.append({
+                        'source': u, 'target': v, 'weight': weight,
+                        'x0': pos[u][0], 'y0': pos[u][1],
+                        'x1': pos[v][0], 'y1': pos[v][1]
+                    })
+                edge_df = pd.DataFrame(edge_data)
+                
+                # ✅ Create the visualization
                 fig = go.Figure()
                 
-                # Add edges
-                edge_x, edge_y = [], []
-                for u, v in G.edges():
-                    x0, y0 = pos[u]; x1, y1 = pos[v]
-                    edge_x += [x0, x1, None]; edge_y += [y0, y1, None]
-                fig.add_trace(go.Scatter(x=edge_x, y=edge_y, mode='lines', 
-                                       line=dict(width=0.5, color='#94a3b8'), hoverinfo='skip'))
+                # Add edges (thicker = stronger coordination)
+                for _, edge in edge_df.iterrows():
+                    fig.add_trace(go.Scatter(
+                        x=[edge['x0'], edge['x1'], None],
+                        y=[edge['y0'], edge['y1'], None],
+                        mode='lines',
+                        line=dict(width=edge['weight'] * 1.5, color='rgba(100, 116, 139, 0.4)'),
+                        hoverinfo='skip',
+                        showlegend=False
+                    ))
                 
-                # Add nodes WITH LABELS
+                # Add nodes with visible labels
                 fig.add_trace(go.Scatter(
-                    x=node_x, y=node_y, mode='markers+text',  # ✅ Show both markers AND text
-                    marker=dict(size=node_size, color=node_size, colorscale='Viridis', 
-                               line_width=1, opacity=0.8),
-                    text=[n for n in G.nodes()],  # ✅ Show account names directly on nodes
-                    textposition="top center",    # ✅ Position labels above nodes
-                    textfont=dict(size=8, color='#1e293b'),  # ✅ Make text readable
-                    hoverinfo='text',
-                    hovertext=node_text
+                    x=node_df['x'],
+                    y=node_df['y'],
+                    mode='markers+text',  # ✅ Show both markers AND text labels
+                    marker=dict(
+                        size=node_df['degree'] * 4 + 12,  # Size by influence
+                        color=node_df['color'],
+                        line=dict(width=2, color='white'),
+                        opacity=0.9
+                    ),
+                    text=node_df['account'],  # ✅ Show account names directly on nodes
+                    textposition="top center",  # Position labels above nodes
+                    textfont=dict(size=9, color='#1F2937', family="monospace"),  # Readable font
+                    hovertemplate="<b>%{text}</b><br>" +
+                                "Platform: %{customdata[0]}<br>" +
+                                "Connections: %{customdata[1]}<br>" +
+                                "<extra></extra>",
+                    customdata=node_df[['platform', 'degree']],
+                    name="Accounts"
                 ))
                 
+                # ✅ Professional styling
                 fig.update_layout(
-                    title="Account Coordination Network", 
-                    height=600,  # ✅ Taller for better label visibility
+                    title=f"Coordination Network — {G_top.number_of_nodes()} accounts, {G_top.number_of_edges()} connections",
+                    height=700,  # Taller for better label visibility
                     plot_bgcolor='white',
-                    xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                    yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                    margin=dict(l=20, r=20, t=60, b=20)  # ✅ More space for labels
+                    paper_bgcolor='white',
+                    xaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-1.2, 1.2]),
+                    yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-1.2, 1.2]),
+                    margin=dict(l=40, r=40, t=80, b=40),
+                    hovermode='closest',
+                    showlegend=True
                 )
+                
+                # ✅ Add legend for platform colors
+                for platform, color in platform_colors.items():
+                    if platform in node_df['platform'].values:
+                        fig.add_trace(go.Scatter(
+                            x=[None], y=[None],
+                            mode='markers',
+                            marker=dict(size=12, color=color, line=dict(width=2, color='white')),
+                            name=platform,
+                            showlegend=True
+                        ))
+                
                 st.plotly_chart(fig, width='stretch')
                 
-                # Stats
-                col1, col2, col3 = st.columns(3)
-                col1.metric("Accounts", G.number_of_nodes())
-                col2.metric("Connections", G.number_of_edges())
-                col3.metric("Avg Connections", f"{sum(dict(G.degree()).values())/G.number_of_nodes():.1f}")
+                # ✅ Stats and export
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("Accounts Shown", G_top.number_of_nodes())
+                col2.metric("Connections", G_top.number_of_edges())
+                col3.metric("Avg Connections", f"{sum(dict(G_top.degree()).values())/G_top.number_of_nodes():.1f}")
+                col4.metric("Strongest Link", f"{edge_df['weight'].max()} shared messages")
                 
                 if st.button("📥 Export Network Data"):
+                    # Export in multiple formats
+                    network_data = {
+                        "nodes": node_df.to_dict('records'),
+                        "edges": edge_df.to_dict('records'),
+                        "metadata": {
+                            "min_connections": min_connections,
+                            "top_n_nodes": top_n_nodes,
+                            "layout": layout_type,
+                            "generated_at": pd.Timestamp.now().isoformat()
+                        }
+                    }
                     st.download_button(
-                        "Download JSON", 
-                        json.dumps(nx.node_link_data(G)), 
-                        "coordination_network.json", 
+                        "Download JSON",
+                        json.dumps(network_data, indent=2),
+                        "coordination_network.json",
                         "application/json"
                     )
+                
+                # ✅ Show top coordinated pairs table
+                with st.expander("🔍 Top Coordinated Account Pairs"):
+                    top_edges = edge_df.nlargest(10, 'weight')
+                    st.dataframe(
+                        top_edges[['source', 'target', 'weight']].rename(
+                            columns={'source': 'Account 1', 'target': 'Account 2', 'weight': 'Shared Messages'}
+                        ),
+                        use_container_width=True,
+                        hide_index=True
+                    )
+                    
             else:
-                st.info("ℹ️ No coordination links detected.")
+                st.info(f"ℹ️ No coordination links found with ≥{min_connections} connections. Try lowering the threshold.")
         else:
-            st.info("ℹ️ Upload data to generate network.")
+            st.info("ℹ️ Upload coordination data to generate network visualization.")
         
     # === TAB 7: Triggers & Entities WITH LEXICON MANAGEMENT ===
     with tabs[6]:
