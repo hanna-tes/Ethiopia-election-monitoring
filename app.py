@@ -592,7 +592,66 @@ def get_ethiopia_summaries(df_clustered_all, filtered_df):
             "Posts_Data": cluster_posts
         })
     return all_summaries
+def get_summaries_for_platform(df_clustered_all, filtered_df_global):
+    """
+    Generates summaries for Tab 4 using the FULL dataset (including reposts) 
+    to capture the entire narrative spread.
+    """
+    if df_clustered_all.empty or 'cluster' not in df_clustered_all.columns:
+        return []
+        
+    # Cluster sizes based on ALL posts
+    cluster_sizes = df_clustered_all[df_clustered_all['cluster'] != -1].groupby('cluster').size()
+    top_15_clusters = cluster_sizes.nlargest(15).index.tolist()
+    all_summaries = []
+    
+    for cluster_id in top_15_clusters:
+        cluster_posts = df_clustered_all[df_clustered_all['cluster'] == cluster_id]
+        
+        # Use ALL posts in the cluster for text aggregation (amplification measurement)
+        all_texts = cluster_posts['object_id'].astype(str).tolist() 
+        all_texts = [t for t in all_texts if len(t.strip()) > 10]
+        
+        # Calculate full reach and platforms
+        total_reach = len(cluster_posts)
+        amplifiers = cluster_posts['account_id'].dropna().unique().tolist()
+        originators = cluster_posts.sort_values('timestamp_share')['account_id'].dropna().unique().tolist()
+        originators = originators[:5] if originators else ["Unknown"]
 
+        if not all_texts:
+            continue
+            
+        min_ts = cluster_posts['timestamp_share'].min()
+        max_ts = cluster_posts['timestamp_share'].max()
+        min_ts_str = min_ts.strftime('%Y-%m-%d') if pd.notna(min_ts) else 'N/A'
+        max_ts_str = max_ts.strftime('%Y-%m-%d') if pd.notna(max_ts) else 'N/A'
+        
+        raw_response = summarize_cluster_ethiopia(  # ✅ Uses Ethiopia-specific summarizer
+            all_texts, 
+            cluster_posts['URL'].dropna().unique().tolist(), 
+            cluster_posts, 
+            min_ts_str, 
+            max_ts_str
+        )
+        
+        virality = assign_virality_tier(total_reach)
+        platform_dist = cluster_posts['Platform'].value_counts()
+        top_platforms = ", ".join([f"{p} ({c})" for p, c in platform_dist.head(3).items()])
+        
+        all_summaries.append({
+            "cluster_id": cluster_id,
+            "Context": raw_response,
+            "Originators": ", ".join([str(a) for a in originators]),
+            "Amplifiers_Count": len(amplifiers),
+            "Total_Reach": total_reach,
+            "Emerging Virality": virality,
+            "Top_Platforms": top_platforms,
+            "Min_TS": min_ts,
+            "Max_TS": max_ts,
+            "Posts_Data": cluster_posts
+        })
+    return all_summaries
+    
 def convert_df_to_csv(df): return df.to_csv(index=False).encode('utf-8')
 
 # === LEXICON MANAGEMENT FUNCTIONS ===
@@ -1110,6 +1169,36 @@ def main():
     if combined_raw.empty:
         st.error("❌ No data loaded. Please check URLs or upload files manually.")
         st.stop()
+
+        # --- Load ORIGINAL POSTS dataset for coordination analysis ---
+    # This is SEPARATE from combined_raw - used exclusively for Tab 3 coordination
+    with st.spinner("📥 Loading Original Posts dataset (for coordination analysis)..."):
+        original_posts_raw_df = load_data_robustly(ORIGINAL_POSTS_URL, "Original Posts Only")
+    
+    if not original_posts_raw_df.empty:
+        # Map columns using same logic as Meltwater
+        def get_col(df, cols):
+            df_cols = [c.lower().strip() for c in df.columns]
+            for col in cols:
+                norm = col.lower().strip()
+                if norm in df_cols:
+                    return df[df.columns[df_cols.index(norm)]]
+            return pd.Series([np.nan]*len(df), index=df.index)
+        
+        original_posts_df = pd.DataFrame()
+        original_posts_df['account_id'] = get_col(original_posts_raw_df, ['influencer'])
+        original_posts_df['content_id'] = get_col(original_posts_raw_df, ['tweet id', 'post id', 'id'])
+        original_posts_df['object_id'] = get_col(original_posts_raw_df, ['hit sentence', 'opening text', 'headline', 'text', 'content'])
+        original_posts_df['URL'] = get_col(original_posts_raw_df, ['url'])
+        original_posts_df['timestamp_share'] = get_col(original_posts_raw_df, ['date', 'timestamp', 'alternate date format'])
+        original_posts_df['source_dataset'] = 'OriginalPosts'  # Label for sidebar
+        
+        # Preprocess same as main dataset
+        df_full_original = final_preprocess_and_map_columns(original_posts_df)
+        df_full_original['timestamp_share'] = df_full_original['timestamp_share'].apply(parse_timestamp_robust)
+    else:
+        # Fallback: empty dataframe with same columns as main dataset
+        df_full_original = pd.DataFrame(columns=['account_id','content_id','object_id','URL','timestamp_share','Platform','original_text','Outlet','Channel','cluster','source_dataset','Sentiment'])
         
     st.sidebar.markdown("### Data Sources (Raw Count)")
     source_counts = combined_raw['source_dataset'].value_counts()
@@ -1223,18 +1312,54 @@ def main():
     
     # === TAB 3: Coordination ===
     with tabs[2]:
-        if not df_clustered.empty and 'cluster' in df_clustered.columns:
-            coord = df_clustered[df_clustered['cluster'] != -1].groupby('cluster').filter(lambda x: len(x['account_id'].unique()) > 1)
-            if not coord.empty:
-                st.success(f"✅ Found {coord['cluster'].nunique()} coordination groups")
-                for cid, group in coord.groupby('cluster'):
-                    with st.expander(f"🔗 Cluster {cid} — {len(group)} posts, {group['account_id'].nunique()} accounts"):
-                        st.code(group['original_text'].iloc[0][:200] + "...", language=None)
-                        st.dataframe(group[['timestamp_share', 'account_id', 'Platform', 'URL']].head(5), use_container_width=True)
+        st.markdown("### 🔍 Coordination Analysis")
+        st.caption("Detecting accounts sharing **identical messages** across ≥5 unique accounts (excluding same-entity cross-posting)")
+        
+        if not filtered_original.empty and 'original_text' in filtered_original.columns:
+            # Group by exact text content
+            exact_matches = filtered_original.groupby('original_text').filter(lambda x: len(x) >= 5)
+            
+            if not exact_matches.empty:
+                # Further filter: ≥5 UNIQUE accounts (not just posts)
+                coordination_groups = []
+                for text, group in exact_matches.groupby('original_text'):
+                    unique_accounts = group['account_id'].dropna().unique()
+                    
+                    # ✅ REQUIREMENT: ≥5 unique accounts
+                    if len(unique_accounts) < 5:
+                        continue
+                    
+                    # ✅ AVOID SELF-COMPARISON: Skip if accounts share same base name (e.g., "Sputnik" media + X)
+                    base_names = [re.sub(r'[^a-zA-Z0-9]', '', acc.lower())[:10] for acc in unique_accounts]
+                    if len(set(base_names)) < len(unique_accounts) * 0.8:  # Allow some variation but catch obvious duplicates
+                        continue
+                    
+                    coordination_groups.append({
+                        'text': text,
+                        'accounts': list(unique_accounts),
+                        'count': len(group),
+                        'platforms': group['Platform'].dropna().unique().tolist(),
+                        'timestamps': group['timestamp_share'].dropna().tolist()
+                    })
+                
+                if coordination_groups:
+                    st.success(f"✅ Found {len(coordination_groups)} coordination groups with identical messages across ≥5 accounts")
+                    
+                    for i, grp in enumerate(sorted(coordination_groups, key=lambda x: x['count'], reverse=True)[:10]):
+                        with st.expander(f"🔗 Group {i+1} — {grp['count']} posts, {len(grp['accounts'])} accounts"):
+                            st.code(grp['text'][:300] + "..." if len(grp['text']) > 300 else grp['text'], language=None)
+                            st.markdown(f"**Accounts:** {', '.join(grp['accounts'][:10])}{'...' if len(grp['accounts']) > 10 else ''}")
+                            st.markdown(f"**Platforms:** {', '.join(grp['platforms'])}")
+                            if grp['timestamps']:
+                                earliest = min(grp['timestamps']).strftime('%Y-%m-%d %H:%M')
+                                latest = max(grp['timestamps']).strftime('%Y-%m-%d %H:%M')
+                                st.caption(f"⏰ First: {earliest} → Last: {latest}")
+                else:
+                    st.info("ℹ️ No coordination detected: No identical messages shared by ≥5 unique accounts (after filtering self-comparisons)")
             else:
-                st.info("ℹ️ No multi-account coordination detected.")
+                st.info("ℹ️ No exact duplicate messages found with ≥5 posts")
         else:
-            st.info("ℹ️ Upload more data to detect coordination.")
+            st.info("ℹ️ No original posts data available for coordination analysis")
     
     # === TAB 4: Risk ===
     with tabs[3]:
@@ -1242,24 +1367,32 @@ def main():
         if not df_clustered.empty:
             sizes = df_clustered[df_clustered['cluster'] != -1].groupby('cluster').size()
             if not sizes.empty:
+                # ✅ FIX: Ensure no NaN/None in Virality column
+                virality_values = []
+                for c in sizes.values:
+                    v = assign_virality_tier(c)
+                    virality_values.append(v if v else "Tier 1: Limited")
+                
                 risk_df = pd.DataFrame({
                     'Cluster': sizes.index, 
                     'Count': sizes.values, 
-                    'Virality': [assign_virality_tier(c) for c in sizes.values]
+                    'Virality': virality_values
                 })
-                # Add explicit color mapping to prevent KeyError
+                
+                # ✅ FIX: Explicit color mapping + category order for ALL tiers
                 fig = px.bar(
                     risk_df.nlargest(10, 'Count'), 
                     x='Cluster', 
                     y='Count', 
                     color='Virality', 
                     title="Top Clusters by Volume",
-                    color_discrete_map={  # ← This prevents the KeyError
+                    color_discrete_map={
                         "Tier 1: Limited": "#94a3b8",
                         "Tier 2: Moderate": "#3b82f6", 
                         "Tier 3: High Spread": "#f59e0b",
                         "Tier 4: Viral Emergency": "#dc2626"
-                    }
+                    },
+                    category_orders={"Virality": ["Tier 1: Limited", "Tier 2: Moderate", "Tier 3: High Spread", "Tier 4: Viral Emergency"]}
                 )
                 st.plotly_chart(fig, width='stretch')
                 st.dataframe(risk_df.nlargest(10, 'Count'), width='stretch')
