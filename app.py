@@ -1363,21 +1363,34 @@ def main():
     
     # === TAB 4: Risk ===
     with tabs[3]:
-        st.markdown("### ⚠️ Narrative Risk Overview")
-        if not df_clustered.empty:
-            sizes = df_clustered[df_clustered['cluster'] != -1].groupby('cluster').size()
-            if not sizes.empty:
-                # ✅ FIX: Ensure no NaN/None in Virality column
-                virality_values = []
-                for c in sizes.values:
-                    v = assign_virality_tier(c)
-                    virality_values.append(v if v else "Tier 1: Limited")
-                
-                risk_df = pd.DataFrame({
-                    'Cluster': sizes.index, 
-                    'Count': sizes.values, 
-                    'Virality': virality_values
-                })
+    st.markdown("### ⚠️ Narrative Risk Overview")
+    if not df_clustered.empty:
+        sizes = df_clustered[df_clustered['cluster'] != -1].groupby('cluster').size()
+        if not sizes.empty:
+            # 🔍 DEBUG: Print values to terminal
+            logger.info(f"🔍 Risk Tab Debug - sizes.values: {sizes.values}")
+            logger.info(f"🔍 Risk Tab Debug - sizes.values type: {type(sizes.values)}")
+            
+            virality_values = []
+            for i, c in enumerate(sizes.values):
+                try:
+                    v = assign_virality_tier(int(c))
+                except Exception as e:
+                    logger.warning(f"⚠️ assign_virality_tier failed for value {c} (index {i}): {e}")
+                    v = "Tier 1: Limited"
+                virality_values.append(v)
+                logger.info(f"🔍 Risk Tab Debug - count={c} → virality='{v}'")
+            
+            logger.info(f"🔍 Risk Tab Debug - Unique virality values: {set(virality_values)}")
+            
+            risk_df = pd.DataFrame({
+                'Cluster': sizes.index, 
+                'Count': sizes.values, 
+                'Virality': virality_values
+            })
+            
+            # 🔍 DEBUG: Show first few rows of risk_df
+            logger.info(f"🔍 Risk Tab Debug - risk_df head:\n{risk_df.head().to_string()}")
                 
                 # ✅ FIX: Explicit color mapping + category order for ALL tiers
                 fig = px.bar(
