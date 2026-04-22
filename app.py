@@ -200,11 +200,11 @@ CFA_LOGO_URL = "https://opportunities.codeforafrica.org/wp-content/uploads/sites
 #TIKTOK_URL = os.path.join(DATA_DIR, "EthiopiaTikTokApril.csv")
 #OPENMEASURES_URL = os.path.join(DATA_DIR, "EthiopiaopenmeasuresApri17.csv")
 #ORIGINAL_POSTS_URL = os.path.join(DATA_DIR, "EthiopiaMeltwaterApril17Original1.csv")
-MELTWATER_URL = "https://raw.githubusercontent.com/hanna-tes/Ethiopia-election-monitoring/refs/heads/main/MeltwaterEthiopiaMar8.csv?token=GHSAT0AAAAAADRDAPFL7BRYK6DIX4HFMBUQ2PF6EBQ"
-CIVICSIGNALS_URL = "https://raw.githubusercontent.com/hanna-tes/Ethiopia-election-monitoring/refs/heads/main/EthiopiaCivicsignalMar8.csv?token=GHSAT0AAAAAADRDAPFLHLGT4462WCZI6VWC2PF6APQ"
-TIKTOK_URL = "https://raw.githubusercontent.com/hanna-tes/Ethiopia-election-monitoring/refs/heads/main/EthiopiaTikTokApril.csv?token=GHSAT0AAAAAADRDAPFKFLXKMHU7Y6GFMYXS2PF7K6Q"
-OPENMEASURES_URL = "https://raw.githubusercontent.com/hanna-tes/Ethiopia-election-monitoring/refs/heads/main/EthiopiaopenmeasuresApri17.csv?token=GHSAT0AAAAAADRDAPFLUMOFJ7I22WQ7EJ6S2PF7JPA"
-ORIGINAL_POSTS_URL = "https://raw.githubusercontent.com/hanna-tes/Ethiopia-election-monitoring/refs/heads/main/EthiopiaMeltwaterApril17Original.csv?token=GHSAT0AAAAAADRDAPFL5BVMRMIV3EEAHRLO2PGO3FA"
+MELTWATER_URL = "https://raw.githubusercontent.com/hanna-tes/Ethiopia-election-monitoring/main/MeltwaterEthiopiaMar8.csv"
+CIVICSIGNALS_URL = "https://raw.githubusercontent.com/hanna-tes/Ethiopia-election-monitoring/main/EthiopiaCivicsignalMar8.csv"
+TIKTOK_URL = "https://raw.githubusercontent.com/hanna-tes/Ethiopia-election-monitoring/main/EthiopiaTikTokApril.csv"
+OPENMEASURES_URL = "https://raw.githubusercontent.com/hanna-tes/Ethiopia-election-monitoring/main/EthiopiaopenmeasuresApri17.csv"
+ORIGINAL_POSTS_URL = "https://raw.githubusercontent.com/hanna-tes/Ethiopia-election-monitoring/main/EthiopiaMeltwaterApril17Original.csv"
 
 # --- Helper Functions ---
 import requests
