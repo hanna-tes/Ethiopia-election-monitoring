@@ -1041,21 +1041,184 @@ def main():
     end_date = (pd.Timestamp(selected_range[1], tz='UTC') + pd.Timedelta(days=1)) if len(selected_range)==2 else start_date + pd.Timedelta(days=1)
     
     filtered_df = df_full[(df_full['timestamp_share'] >= start_date) & (df_full['timestamp_share'] < end_date)].copy()
+
+    f 'object_id' in df_full.columns:
+        original_mask = df_full['object_id'].apply(is_original_post) & \
+                       (~df_full['object_id'].str.contains('🔁', na=False)) & \
+                       (~df_full['object_id'].str.startswith('RT @', na=False))
+        df_original_only = df_full[original_mask].copy()
+    else:
+        df_original_only = df_full.copy()
     
+    filtered_original = df_original_only[
+        (df_original_only['timestamp_share'] >= start_date) & 
+        (df_original_only['timestamp_share'] < end_date)
+    ].copy()
+
     # Clustering
     df_clustered = cached_clustering(filtered_df, eps=0.3, min_samples=2, max_features=5000) if not filtered_df.empty else pd.DataFrame()
+
+    def generate_simple_summaries(df_clustered, filtered_df):
+        """Lightweight summary generation for sidebar (no LLM required)"""
+        summaries = []
+        if df_clustered.empty or 'cluster' not in df_clustered.columns:
+            return summaries
+        
+        # Get cluster sizes
+        cluster_sizes = df_clustered[df_clustered['cluster'] != -1].groupby('cluster').size()
+        
+        for cluster_id in cluster_sizes.index[:10]:  # Top 10 clusters
+            cluster_posts = df_clustered[df_clustered['cluster'] == cluster_id]
+            count = len(cluster_posts)
+            
+            # Extract a representative text snippet
+            sample_text = cluster_posts['original_text'].iloc[0][:150] + "..." if len(cluster_posts) > 0 else "No content"
+            
+            # Determine virality tier
+            virality = assign_virality_tier(count)
+            
+            # Get platform diversity
+            platforms = cluster_posts['Platform'].dropna().unique()
+            
+            summaries.append({
+                'cluster_id': cluster_id,
+                'count': count,
+                'virality': virality,
+                'platforms': len(platforms),
+                'sample_text': sample_text,
+                'top_platform': platforms[0] if len(platforms) > 0 else 'Unknown'
+            })
+        
+        return summaries
     
+    all_summaries = generate_simple_summaries(df_clustered, filtered_df)
+
     # Metrics
     total_posts = len(filtered_df)
     unique_accounts = filtered_df['account_id'].nunique()
     top_platform = filtered_df['Platform'].mode()[0] if not filtered_df['Platform'].mode().empty else "—"
     clusters_found = len(df_clustered[df_clustered['cluster'] != -1]['cluster'].unique()) if not df_clustered.empty else 0
-    
-    # === TABS ===
-    tabs = st.tabs([
-        "🏠 Dashboard", "📊 Insights", "🔍 Coordination", "⚠️ Risk", "📰 Narratives",
-        "🕸️ Network Intelligence", "🎯 Triggers & Entities"
-    ])
+
+    # =============================================================================
+    # 🎛️ ENHANCED SIDEBAR: Live Data Insights (Ethiopia-Compatible + New Features)
+    # =============================================================================
+    with st.sidebar:
+        # --- Header ---
+        st.markdown("### 📊 Data Overview")
+        st.caption(f"Last updated: {pd.Timestamp.now(tz='UTC').strftime('%Y-%m-%d %H:%M UTC')}")
+        st.divider()
+        
+        # --- Key Metrics Grid ---
+        m1, m2 = st.columns(2)
+        m1.metric("Posts Analyzed", f"{len(filtered_df):,}")
+        m2.metric("Original Posts", f"{len(filtered_original):,}")  # ✅ Now works!
+        
+        m3, m4 = st.columns(2)
+        m3.metric("Unique Accounts", f"{filtered_df['account_id'].nunique():,}" if not filtered_df.empty else "—")
+        m4.metric("Active Narratives", f"{len(all_summaries):,}")  # ✅ Now works!
+        
+        st.divider()
+        
+        # --- Data Sources (Raw Count) ---
+        st.markdown("### 📁 Source Distribution (Raw)")
+        if 'source_dataset' in combined_raw.columns and not combined_raw.empty:
+            source_counts = combined_raw['source_dataset'].value_counts()
+            for src, count in source_counts.items():
+                pct = count / len(combined_raw) if len(combined_raw) > 0 else 0
+                st.progress(pct, text=f"{src}: {count:,} ({pct:.0%})")
+        else:
+            st.caption("ℹ️ No source data available")
+        
+        st.divider()
+        
+        # --- Platform Breakdown (Filtered) ---
+        st.markdown("### 📱 Platform Breakdown (Filtered)")
+        if not filtered_df.empty and 'Platform' in filtered_df.columns:
+            platform_counts = filtered_df['Platform'].value_counts()
+            for platform, count in platform_counts.items():
+                pct = count / len(filtered_df)
+                st.progress(pct, text=f"{platform}: {count:,} ({pct:.0%})")
+        else:
+            st.caption("ℹ️ No platform data available")
+        
+        st.divider()
+        
+        # --- Narrative Virality Distribution (from all_summaries) ---
+        if all_summaries:
+            st.markdown("### 📈 Narrative Virality")
+            virality_counts = Counter([s['virality'] for s in all_summaries])
+            for tier in ["Tier 4: Viral Emergency", "Tier 3: High Spread", "Tier 2: Moderate", "Tier 1: Limited"]:
+                count = virality_counts.get(tier, 0)
+                if count > 0:
+                    pct = count / len(all_summaries)
+                    icon = {"Tier 4: Viral Emergency": "🚨", "Tier 3: High Spread": "🔴", 
+                           "Tier 2: Moderate": "🟡", "Tier 1: Limited": "🟢"}.get(tier, "⚪")
+                    st.progress(pct, text=f"{icon} {tier.split(':')[0]}: {count}")
+        
+        st.divider()
+        
+        # --- Sentiment Distribution (if available) ---
+        if 'Sentiment' in filtered_df.columns and not filtered_df.empty:
+            st.markdown("### 😊 Sentiment Split")
+            sentiment_counts = filtered_df['Sentiment'].value_counts()
+            for sentiment, count in sentiment_counts.items():
+                pct = count / len(filtered_df)
+                emoji = {"Negative": "🔴", "Neutral": "🟡", "Positive": "🟢"}.get(sentiment, "⚪")
+                st.progress(pct, text=f"{emoji} {sentiment}: {count:,} ({pct:.0%})")
+        
+        st.divider()
+        
+        # --- Date Range Info ---
+        st.markdown("### 📅 Active Filter")
+        if len(selected_range) == 2:
+            st.caption(f"{selected_range[0]} → {selected_range[1]}")
+        else:
+            st.caption(f"Single day: {selected_range[0]}")
+        
+        if not filtered_df.empty and 'timestamp_share' in filtered_df.columns:
+            valid_ts = filtered_df['timestamp_share'].dropna()
+            if not valid_ts.empty:
+                st.caption(f"Posts in range: {len(valid_ts):,}")
+        
+        st.divider()
+        
+        # --- Export Section ---
+        st.markdown("### 📥 Export Data")
+        if not filtered_df.empty:
+            st.download_button(
+                label="📄 Download Filtered CSV",
+                data=convert_df_to_csv(filtered_df),
+                file_name="ethiopia_election_filtered.csv",
+                mime="text/csv",
+                width='stretch'
+            )
+            if not filtered_original.empty and len(filtered_original) != len(filtered_df):
+                st.download_button(
+                    label="📄 Download Original Posts Only",
+                    data=convert_df_to_csv(filtered_original),
+                    file_name="ethiopia_original_posts.csv",
+                    mime="text/csv",
+                    width='stretch'
+                )
+        
+        st.markdown("---")
+        
+        # --- About / Footer ---
+        st.markdown("### ℹ️ About")
+        st.caption("""
+        Ethiopia Election Monitor v1.2
+        • Lexicon management
+        • Amharic/English support
+        • Risk scoring & coordination detection
+        
+        Built with Streamlit • Code for Africa
+        """)
+        
+        # === TABS ===
+        tabs = st.tabs([
+            "🏠 Dashboard", "📊 Insights", "🔍 Coordination", "⚠️ Risk", "📰 Narratives",
+            "🕸️ Network Intelligence", "🎯 Triggers & Entities"
+        ])
     
     # === TAB 1: Dashboard ===
     with tabs[0]:
@@ -1070,7 +1233,7 @@ def main():
             plot_df = filtered_df.set_index('timestamp_share').resample('h').size()
             if not plot_df.empty:
                 fig = px.area(plot_df, title="Hourly Post Volume", labels={'value': 'Posts'})
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
     
     # === TAB 2: Insights ===
     with tabs[1]:
@@ -1078,10 +1241,10 @@ def main():
             col1, col2 = st.columns(2)
             with col1:
                 fig = px.bar(filtered_df['account_id'].value_counts().head(10), title="Top Accounts")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             with col2:
                 fig = px.pie(filtered_df['Platform'].value_counts(), title="Platform Distribution")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             st.dataframe(filtered_df[['timestamp_share', 'Platform', 'account_id', 'object_id']].head(10), use_container_width=True)
     
     # === TAB 3: Coordination ===
@@ -1105,9 +1268,13 @@ def main():
         if not df_clustered.empty:
             sizes = df_clustered[df_clustered['cluster'] != -1].groupby('cluster').size()
             if not sizes.empty:
-                risk_df = pd.DataFrame({'Cluster': sizes.index, 'Count': sizes.values, 'Virality': sizes.apply(assign_virality_tier)})
+                risk_df = pd.DataFrame({
+                    'Cluster': sizes.index, 
+                    'Count': sizes.values, 
+                    'Virality': sizes.values.map(assign_virality_tier)
+                })
                 fig = px.bar(risk_df.nlargest(10, 'Count'), x='Cluster', y='Count', color='Virality', title="Top Clusters by Volume")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
                 st.dataframe(risk_df.nlargest(10, 'Count'), use_container_width=True)
     
     # === TAB 5: Narratives ===
@@ -1157,7 +1324,7 @@ def main():
                 fig.update_layout(title="Account Coordination Network", height=500, plot_bgcolor='white',
                     xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
                     yaxis=dict(showgrid=False, zeroline=False, showticklabels=False))
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
                 
                 col1, col2, col3 = st.columns(3)
                 col1.metric("Nodes", G.number_of_nodes())
@@ -1251,13 +1418,13 @@ def main():
             if analytics['category_distribution']:
                 cat_df = pd.DataFrame([{'category': cat.replace('_', ' ').title(), 'count': cnt} for cat, cnt in analytics['category_distribution'].items()]).sort_values('count', ascending=False)
                 fig = px.pie(cat_df, values='count', names='category', title="Triggers by Category")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             
             if analytics['temporal_trend']:
                 trend_df = pd.DataFrame([{'date': d, 'matches': c} for d, c in analytics['temporal_trend'].items()])
                 trend_df['date'] = pd.to_datetime(trend_df['date'])
                 fig = px.area(trend_df, x='date', y='matches', title="Daily Trigger Mentions")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
         
         # === ✨ NEW: Sub-tab 4: Lexicon Management ===
         with sub_tabs[3]:
