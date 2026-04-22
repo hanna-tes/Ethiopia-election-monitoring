@@ -1305,30 +1305,46 @@ def main():
     
     # === TAB 1: Dashboard ===
     with tabs[0]:
-        st.markdown("### 📈 Key Metrics")
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Posts Analyzed", f"{total_posts:,}")
-        m2.metric("Unique Accounts", f"{unique_accounts:,}")
-        m3.metric("Top Platform", top_platform)
-        m4.metric("Coordination Clusters", clusters_found)
-        st.divider()
-        if not filtered_df.empty:
-            plot_df = filtered_df.set_index('timestamp_share').resample('h').size()
-            if not plot_df.empty:
-                fig = px.area(plot_df, title="Hourly Post Volume", labels={'value': 'Posts'})
-                st.plotly_chart(fig, width='stretch')
+        st.markdown(f"""
+        This dashboard supports the early detection of information manipulation and disinformation campaigns during election periods that seek to distort public opinion by:
+        1. **Detecting Emerging Narratives**
+        2. **Tracking Virality**
+        3. **Providing Evidence**
+        
+        Data is updated weekly. Last updated: **{last_update_time}**
+        """)
+        
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Posts Analyzed", f"{total_posts:,}") 
+        col2.metric("Active Narratives", valid_clusters_count)
+        col3.metric("Top Platform", top_platform)
+        col4.metric("Alert Level", "🚨 High" if high_virality_count > 5 else "⚠️ Medium" if high_virality_count > 0 else "✅ Low")
+        st.divider() 
     
     # === TAB 2: Insights ===
     with tabs[1]:
-        if not filtered_df.empty:
-            col1, col2 = st.columns(2)
-            with col1:
-                fig = px.bar(filtered_df['account_id'].value_counts().head(10), title="Top Accounts")
-                st.plotly_chart(fig, width='stretch')
-            with col2:
-                fig = px.pie(filtered_df['Platform'].value_counts(), title="Platform Distribution")
-                st.plotly_chart(fig, width='stretch')
-            st.dataframe(filtered_df[['timestamp_share', 'Platform', 'account_id', 'object_id']].head(10), width='stretch')
+        st.markdown("### 🔬 Data Insights")
+        st.markdown(f"**Total Rows:** `{len(filtered_df_global):,}` | **Date Range:** {selected_date_range[0]} to {selected_date_range[-1]}")
+        if not filtered_df_global.empty:
+            top_influencers = filtered_df_global['account_id'].value_counts().head(10)
+            fig_src = px.bar(top_influencers, title="Top 10 Influencers (Total Posts)", labels={'value': 'Post Count', 'index': 'Account ID'})
+            st.plotly_chart(fig_src, use_container_width=True, key="top_influencers")
+            platform_counts = filtered_df_global['Platform'].value_counts()
+            fig_platform = px.bar(platform_counts, title="Post Distribution by Platform", labels={'value': 'Post Count', 'index': 'Platform'})
+            st.plotly_chart(fig_platform, use_container_width=True, key="platform_dist")
+            social_media_df = filtered_df_global[~filtered_df_global['Platform'].isin(['Media', 'News/Media'])].copy()
+            if not social_media_df.empty and 'object_id' in social_media_df.columns:
+                social_media_df['hashtags'] = social_media_df['object_id'].astype(str).str.findall(r'#\w+').apply(lambda x: [tag.lower() for tag in x])
+                all_hashtags = [tag for tags_list in social_media_df['hashtags'] if isinstance(tags_list, list) for tag in tags_list]
+                if all_hashtags:
+                    hashtag_counts = pd.Series(all_hashtags).value_counts().head(10)
+                    fig_ht = px.bar(hashtag_counts, title="Top 10 Hashtags (Social Media Only)", labels={'value': 'Frequency', 'index': 'Hashtag'})
+                    st.plotly_chart(fig_ht, use_container_width=True, key="top_hashtags")
+            plot_df = filtered_df_global.copy()
+            plot_df = plot_df.set_index('timestamp_share')
+            time_series = plot_df.resample('D').size()
+            fig_ts = px.area(time_series, title="Daily Post Volume", labels={'value': 'Total Posts', 'timestamp_share': 'Date'})
+            st.plotly_chart(fig_ts, use_container_width=True, key="daily_volume")
     
     # === TAB 3: Coordination ===
     with tabs[2]:
@@ -1340,7 +1356,6 @@ def main():
             exact_matches = filtered_original.groupby('original_text').filter(lambda x: len(x) >= 5)
             
             if not exact_matches.empty:
-                # Further filter: ≥5 UNIQUE accounts (not just posts)
                 coordination_groups = []
                 for text, group in exact_matches.groupby('original_text'):
                     unique_accounts = group['account_id'].dropna().unique()
@@ -1349,9 +1364,9 @@ def main():
                     if len(unique_accounts) < 5:
                         continue
                     
-                    # ✅ AVOID SELF-COMPARISON: Skip if accounts share same base name (e.g., "Sputnik" media + X)
+                    # ✅ AVOID SELF-COMPARISON
                     base_names = [re.sub(r'[^a-zA-Z0-9]', '', acc.lower())[:10] for acc in unique_accounts]
-                    if len(set(base_names)) < len(unique_accounts) * 0.8:  # Allow some variation but catch obvious duplicates
+                    if len(set(base_names)) < len(unique_accounts) * 0.8:
                         continue
                     
                     coordination_groups.append({
@@ -1359,7 +1374,8 @@ def main():
                         'accounts': list(unique_accounts),
                         'count': len(group),
                         'platforms': group['Platform'].dropna().unique().tolist(),
-                        'timestamps': group['timestamp_share'].dropna().tolist()
+                        'timestamps': group['timestamp_share'].dropna().tolist(),
+                        'posts_data': group[['account_id', 'Platform', 'URL', 'timestamp_share', 'original_text']]  # ✅ Add posts data
                     })
                 
                 if coordination_groups:
@@ -1374,6 +1390,18 @@ def main():
                                 earliest = min(grp['timestamps']).strftime('%Y-%m-%d %H:%M')
                                 latest = max(grp['timestamps']).strftime('%Y-%m-%d %H:%M')
                                 st.caption(f"⏰ First: {earliest} → Last: {latest}")
+                            
+                            # ✅ SHOW ACTUAL POSTS FROM THESE ACCOUNTS
+                            with st.expander("📄 View Posts from These Accounts"):
+                                st.dataframe(
+                                    grp['posts_data'].head(20),  # Show first 20 posts
+                                    use_container_width=True,
+                                    hide_index=True,
+                                    column_config={
+                                        "URL": st.column_config.LinkColumn("Link", display_text="🔗 View"),
+                                        "timestamp_share": st.column_config.DatetimeColumn("Time", format="YYYY-MM-DD HH:mm")
+                                    }
+                                )
                 else:
                     st.info("ℹ️ No coordination detected: No identical messages shared by ≥5 unique accounts (after filtering self-comparisons)")
             else:
@@ -1387,42 +1415,35 @@ def main():
         if not df_clustered.empty:
             sizes = df_clustered[df_clustered['cluster'] != -1].groupby('cluster').size()
             if not sizes.empty:
-                # Generate virality tiers
-                virality_values = [assign_virality_tier(int(c)) for c in sizes.values]
+                # Generate virality tiers safely
+                virality_values = []
+                for c in sizes.values:
+                    try:
+                        v = assign_virality_tier(int(c))
+                    except:
+                        v = "Tier 1: Limited"
+                    virality_values.append(v if isinstance(v, str) and v.strip() else "Tier 1: Limited")
                 
                 risk_df = pd.DataFrame({
                     'Cluster': sizes.index, 
                     'Count': sizes.values, 
                     'Virality': virality_values
-                })
+                }).dropna(subset=['Virality'])
                 
-                # ✅ BULLETPROOF FIX: Convert to Categorical with explicit order
-                virality_order = ["Tier 1: Limited", "Tier 2: Moderate", "Tier 3: High Spread", "Tier 4: Viral Emergency"]
-                risk_df['Virality'] = pd.Categorical(risk_df['Virality'], categories=virality_order, ordered=True)
-                risk_df = risk_df.dropna(subset=['Virality'])  # Remove any invalid tiers
-                
-                default_colors = {
-                    "Tier 1: Limited": "#94a3b8",
-                    "Tier 2: Moderate": "#3b82f6", 
-                    "Tier 3: High Spread": "#f59e0b",
-                    "Tier 4: Viral Emergency": "#dc2626"
-                }
-                
-                try:
+                if risk_df.empty:
+                    st.info("ℹ️ No valid risk data after filtering")
+                else:
+                    # ✅ Use Plotly's built-in color sequence instead of manual map
                     fig = px.bar(
                         risk_df.nlargest(10, 'Count'), 
                         x='Cluster', 
                         y='Count', 
                         color='Virality', 
                         title="Top Clusters by Volume",
-                        color_discrete_map=default_colors
+                        color_discrete_sequence=px.colors.qualitative.Set2  # ✅ Built-in palette avoids KeyError
                     )
                     st.plotly_chart(fig, width='stretch')
-                except Exception as e:
-                    logger.error(f"⚠️ Risk chart failed: {e}")
-                    st.warning("⚠️ Chart rendering skipped due to data mismatch. Showing table instead.")
-                
-                st.dataframe(risk_df.nlargest(10, 'Count'), width='stretch')
+                    st.dataframe(risk_df.nlargest(10, 'Count'), width='stretch')
             else:
                 st.info("ℹ️ No cluster data available for risk assessment")
         else:
@@ -1431,59 +1452,111 @@ def main():
     # === TAB 5: Narratives ===
     with tabs[4]:
         st.markdown("### 📰 Trending Narratives")
-        st.info("ℹ️ Narrative summaries require LLM API key. Showing raw cluster data instead.")
-        if not df_clustered.empty:
-            for cid in df_clustered[df_clustered['cluster'] != -1]['cluster'].unique()[:5]:
-                cluster_posts = df_clustered[df_clustered['cluster'] == cid]
-                st.markdown(f"#### Cluster #{cid} — {len(cluster_posts)} posts")
-                st.write(cluster_posts['original_text'].iloc[0][:300] + "...")
-                st.caption(f"Platforms: {', '.join(cluster_posts['Platform'].unique())}")
+        
+        if not all_summaries:
+            st.info("ℹ️ No narrative summaries generated. Check data volume or LLM API status.")
+        else:
+            for summary in sorted(all_summaries, key=lambda x: x['Total_Reach'], reverse=True):
+                st.markdown(f"### Cluster #{summary['cluster_id']} — {summary['Emerging Virality']}")
+                
+                # Metrics row
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Total Reach", f"{summary['Total_Reach']:,}")
+                m2.metric("Amplifiers", f"{summary['Amplifiers_Count']:,}")
+                m3.caption(f"Platforms: {summary['Top_Platforms']}")
+                
+                # ✅ SHOW LLM-GENERATED NARRATIVE REPORT
+                st.markdown("**Narrative Intelligence Report:**")
+                st.write(summary['Context'])
+                
+                # Originators
+                if summary['Originators'] != "Unknown":
+                    st.caption(f"🔍 Originators: {summary['Originators']}")
+                
+                # Evidence table (collapsible)
+                with st.expander(f"📂 View Cluster Evidence ({summary['Total_Reach']} posts)"):
+                    pdf = summary['Posts_Data'].copy()
+                    if 'timestamp_share' in pdf.columns:
+                        pdf['Timestamp'] = pdf['timestamp_share'].dt.strftime('%Y-%m-%d %H:%M')
+                    st.dataframe(
+                        pdf[['Timestamp', 'Platform', 'account_id', 'object_id', 'URL']] if 'Timestamp' in pdf.columns else pdf[['Platform', 'account_id', 'object_id', 'URL']],
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={"URL": st.column_config.LinkColumn("Link", display_text="🔗 View")}
+                    )
                 st.divider()
     
     # === TAB 6: Network & Coordination Intelligence ===
     with tabs[5]:
-        st.subheader("🕸️ Network & Coordination Intelligence")
+        st.subheader("🕸️ Account Coordination Network")
+        st.caption("Nodes = accounts | Edges = shared identical messages | Size = number of shared messages")
+        
         if not df_clustered.empty and 'cluster' in df_clustered.columns:
+            # Build graph from coordination groups (exact matches only)
             G = nx.Graph()
             for cid, group in df_clustered[df_clustered['cluster'] != -1].groupby('cluster'):
                 accounts = group['account_id'].dropna().unique()
                 if len(accounts) > 1:
+                    # Add edges between all accounts in the same cluster
                     for i in range(len(accounts)):
                         for j in range(i+1, len(accounts)):
                             G.add_edge(accounts[i], accounts[j], weight=1)
             
             if G.number_of_edges() > 0:
-                pos = nx.spring_layout(G, seed=42)
+                # Use spring layout with better spacing
+                pos = nx.spring_layout(G, k=0.5, iterations=50, seed=42)
+                
+                # Create node trace with visible labels
+                node_x = [pos[n][0] for n in G.nodes()]
+                node_y = [pos[n][1] for n in G.nodes()]
+                node_text = [f"{n}<br>Degree: {G.degree(n)}" for n in G.nodes()]
+                node_size = [G.degree(n)*3 + 10 for n in G.nodes()]  # Scale by degree
+                
+                fig = go.Figure()
+                
+                # Add edges
                 edge_x, edge_y = [], []
                 for u, v in G.edges():
                     x0, y0 = pos[u]; x1, y1 = pos[v]
                     edge_x += [x0, x1, None]; edge_y += [y0, y1, None]
+                fig.add_trace(go.Scatter(x=edge_x, y=edge_y, mode='lines', 
+                                       line=dict(width=0.5, color='#94a3b8'), hoverinfo='skip'))
                 
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(x=edge_x, y=edge_y, mode='lines', line=dict(width=0.5, color='#94a3b8'), hoverinfo='skip'))
-                node_x = [pos[n][0] for n in G.nodes()]
-                node_y = [pos[n][1] for n in G.nodes()]
-                node_deg = [G.degree(n) for n in G.nodes()]
-                
-                # FIXED: Only ONE text parameter with hover info
+                # Add nodes WITH LABELS
                 fig.add_trace(go.Scatter(
-                    x=node_x, y=node_y, mode='markers',
-                    marker=dict(size=[d*3+8 for d in node_deg], color=node_deg, colorscale='Viridis', line_width=1, opacity=0.8),
+                    x=node_x, y=node_y, mode='markers+text',  # ✅ Show both markers AND text
+                    marker=dict(size=node_size, color=node_size, colorscale='Viridis', 
+                               line_width=1, opacity=0.8),
+                    text=[n for n in G.nodes()],  # ✅ Show account names directly on nodes
+                    textposition="top center",    # ✅ Position labels above nodes
+                    textfont=dict(size=8, color='#1e293b'),  # ✅ Make text readable
                     hoverinfo='text',
-                    text=[f"{n}<br>Degree: {G.degree(n)}" for n in G.nodes()]  # ← Only ONE text parameter
+                    hovertext=node_text
                 ))
-                fig.update_layout(title="Account Coordination Network", height=500, plot_bgcolor='white',
+                
+                fig.update_layout(
+                    title="Account Coordination Network", 
+                    height=600,  # ✅ Taller for better label visibility
+                    plot_bgcolor='white',
                     xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                    yaxis=dict(showgrid=False, zeroline=False, showticklabels=False))
+                    yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                    margin=dict(l=20, r=20, t=60, b=20)  # ✅ More space for labels
+                )
                 st.plotly_chart(fig, width='stretch')
                 
+                # Stats
                 col1, col2, col3 = st.columns(3)
-                col1.metric("Nodes", G.number_of_nodes())
-                col2.metric("Edges", G.number_of_edges())
-                col3.metric("Avg Degree", f"{sum(dict(G.degree()).values())/G.number_of_nodes():.1f}")
+                col1.metric("Accounts", G.number_of_nodes())
+                col2.metric("Connections", G.number_of_edges())
+                col3.metric("Avg Connections", f"{sum(dict(G.degree()).values())/G.number_of_nodes():.1f}")
                 
-                if st.button("📥 Export Network"):
-                    st.download_button("Download JSON", json.dumps(nx.node_link_data(G)), "network.json", "application/json")
+                if st.button("📥 Export Network Data"):
+                    st.download_button(
+                        "Download JSON", 
+                        json.dumps(nx.node_link_data(G)), 
+                        "coordination_network.json", 
+                        "application/json"
+                    )
             else:
                 st.info("ℹ️ No coordination links detected.")
         else:
@@ -1492,7 +1565,43 @@ def main():
     # === TAB 7: Triggers & Entities WITH LEXICON MANAGEMENT ===
     with tabs[6]:
         st.subheader("🎯 Trigger Terms & Targeted Entities")
-        st.markdown("*Ethiopia Hate Speech Lexicon • Amharic/English Support • Non-technical Management*")
+        
+        # ✅ SHOW TOP TRIGGER TERMS FROM DATASET (New Section)
+        with st.expander("📊 Top Trigger Terms in Current Dataset", expanded=True):
+            if not filtered_df.empty and 'original_text' in filtered_df.columns:
+                # Scan all posts for lexicon matches
+                all_matches = []
+                for _, row in filtered_df.iterrows():
+                    text = str(row.get('original_text', ''))
+                    matches = scan_text_for_lexicon_terms(text)
+                    all_matches.extend(matches)
+                
+                if all_matches:
+                    # Aggregate by term
+                    term_counts = Counter([m['term'] for m in all_matches])
+                    top_terms = term_counts.most_common(10)
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.markdown("**🔥 Most Frequent Trigger Terms**")
+                        for term, count in top_terms:
+                            # Find metadata for display
+                            metadata = next((t for cat in CONFIG['lexicon'].values() for t in [v for k,v in cat.items() if k==term]), {})
+                            severity = metadata.get('severity', 'medium')
+                            severity_icon = {"low": "🟢", "medium": "🟡", "high": "🟠", "critical": "🔴"}.get(severity, "⚪")
+                            st.markdown(f"{severity_icon} `{term}` — {count:,} mentions")
+                    
+                    with col2:
+                        st.markdown("**🎯 Most Targeted Entities**")
+                        entity_counts = Counter([m['target_entity'] for m in all_matches if m['target_entity']])
+                        for entity, count in entity_counts.most_common(5):
+                            st.markdown(f"👤 `{entity}` — {count:,} mentions")
+                else:
+                    st.info("ℹ️ No lexicon matches found in current date range")
+            else:
+                st.info("ℹ️ No data available for trigger analysis")
+        
+        st.divider()
         
         # 4 sub-tabs including Lexicon Management
         sub_tabs = st.tabs(["🔍 Trigger Scanner", "👥 Entity Registry", "📊 Analytics", "⚙️ Lexicon Management"])
