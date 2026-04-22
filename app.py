@@ -1222,20 +1222,17 @@ def main():
     start_date = pd.Timestamp(selected_range[0] if len(selected_range)==2 else selected_range[0], tz='UTC')
     end_date = (pd.Timestamp(selected_range[1], tz='UTC') + pd.Timedelta(days=1)) if len(selected_range)==2 else start_date + pd.Timedelta(days=1)
     
+        # 1. Filter MAIN dataset (for narratives, risk, dashboard)
     filtered_df = df_full[(df_full['timestamp_share'] >= start_date) & (df_full['timestamp_share'] < end_date)].copy()
 
-    if 'object_id' in df_full.columns:
-        original_mask = df_full['object_id'].apply(is_original_post) & \
-                       (~df_full['object_id'].str.contains('🔁', na=False)) & \
-                       (~df_full['object_id'].str.startswith('RT @', na=False))
-        df_original_only = df_full[original_mask].copy()
+    # 2. Filter SEPARATELY LOADED Original Posts dataset (for coordination)
+    if not df_full_original.empty:
+        filtered_original = df_full_original[
+            (df_full_original['timestamp_share'] >= start_date) & 
+            (df_full_original['timestamp_share'] < end_date)
+        ].copy()
     else:
-        df_original_only = df_full.copy()
-    
-    filtered_original = df_original_only[
-        (df_original_only['timestamp_share'] >= start_date) & 
-        (df_original_only['timestamp_share'] < end_date)
-    ].copy()
+        filtered_original = pd.DataFrame(columns=df_full.columns)
 
     # Side bar
     st.sidebar.markdown("### Platform Breakdown (Filtered Count)")
@@ -1308,7 +1305,7 @@ def main():
             with col2:
                 fig = px.pie(filtered_df['Platform'].value_counts(), title="Platform Distribution")
                 st.plotly_chart(fig, width='stretch')
-            st.dataframe(filtered_df[['timestamp_share', 'Platform', 'account_id', 'object_id']].head(10), use_container_width=True)
+            st.dataframe(filtered_df[['timestamp_share', 'Platform', 'account_id', 'object_id']].head(10), width='stretch')
     
     # === TAB 3: Coordination ===
     with tabs[2]:
@@ -1367,20 +1364,8 @@ def main():
         if not df_clustered.empty:
             sizes = df_clustered[df_clustered['cluster'] != -1].groupby('cluster').size()
             if not sizes.empty:
-                # 🔍 DEBUG: Print exact values to terminal
-                logger.info(f"🔍 Risk Debug - Counts: {sizes.values}")
-                logger.info(f"🔍 Risk Debug - Count type: {type(sizes.values[0])}")
-                
-                virality_values = []
-                for c in sizes.values:
-                    try:
-                        v = assign_virality_tier(int(c))
-                    except Exception as e:
-                        logger.warning(f"⚠️ Virality tier failed for {c}: {e}")
-                        v = "Tier 1: Limited"
-                    virality_values.append(v)
-                
-                logger.info(f"🔍 Risk Debug - Unique Virality Values: {set(virality_values)}")
+                # Generate virality tiers
+                virality_values = [assign_virality_tier(int(c)) for c in sizes.values]
                 
                 risk_df = pd.DataFrame({
                     'Cluster': sizes.index, 
@@ -1388,24 +1373,32 @@ def main():
                     'Virality': virality_values
                 })
                 
-                # ✅ Dynamic color map to prevent KeyError
+                # ✅ BULLETPROOF FIX: Convert to Categorical with explicit order
+                virality_order = ["Tier 1: Limited", "Tier 2: Moderate", "Tier 3: High Spread", "Tier 4: Viral Emergency"]
+                risk_df['Virality'] = pd.Categorical(risk_df['Virality'], categories=virality_order, ordered=True)
+                risk_df = risk_df.dropna(subset=['Virality'])  # Remove any invalid tiers
+                
                 default_colors = {
                     "Tier 1: Limited": "#94a3b8",
                     "Tier 2: Moderate": "#3b82f6", 
                     "Tier 3: High Spread": "#f59e0b",
                     "Tier 4: Viral Emergency": "#dc2626"
                 }
-                dynamic_colors = {v: default_colors.get(v, "#64748b") for v in set(virality_values)}
                 
-                fig = px.bar(
-                    risk_df.nlargest(10, 'Count'), 
-                    x='Cluster', 
-                    y='Count', 
-                    color='Virality', 
-                    title="Top Clusters by Volume",
-                    color_discrete_map=dynamic_colors
-                )
-                st.plotly_chart(fig, width='stretch')
+                try:
+                    fig = px.bar(
+                        risk_df.nlargest(10, 'Count'), 
+                        x='Cluster', 
+                        y='Count', 
+                        color='Virality', 
+                        title="Top Clusters by Volume",
+                        color_discrete_map=default_colors
+                    )
+                    st.plotly_chart(fig, width='stretch')
+                except Exception as e:
+                    logger.error(f"⚠️ Risk chart failed: {e}")
+                    st.warning("⚠️ Chart rendering skipped due to data mismatch. Showing table instead.")
+                
                 st.dataframe(risk_df.nlargest(10, 'Count'), width='stretch')
             else:
                 st.info("ℹ️ No cluster data available for risk assessment")
