@@ -1042,7 +1042,7 @@ def main():
     
     filtered_df = df_full[(df_full['timestamp_share'] >= start_date) & (df_full['timestamp_share'] < end_date)].copy()
 
-    f 'object_id' in df_full.columns:
+    if 'object_id' in df_full.columns:
         original_mask = df_full['object_id'].apply(is_original_post) & \
                        (~df_full['object_id'].str.contains('🔁', na=False)) & \
                        (~df_full['object_id'].str.startswith('RT @', na=False))
