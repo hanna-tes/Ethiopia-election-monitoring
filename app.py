@@ -1296,6 +1296,8 @@ def main():
     top_platform = filtered_df['Platform'].mode()[0] if not filtered_df['Platform'].mode().empty else "—"
     clusters_found = len(df_clustered[df_clustered['cluster'] != -1]['cluster'].unique()) if not df_clustered.empty else 0
     last_update_time = pd.Timestamp.now(tz='UTC').strftime('%Y-%m-%d %H:%M UTC')
+    valid_clusters_count = len(all_summaries)  
+    high_virality_count = len([s for s in all_summaries if "Tier 4" in s.get("Emerging Virality","")])
 
         
     # === TABS ===
