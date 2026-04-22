@@ -506,6 +506,92 @@ def assign_virality_tier(n):
     elif n>=100: return "Tier 3: High Spread"
     elif n>=20: return "Tier 2: Moderate"
     else: return "Tier 1: Limited"
+        
+# --- Summarize Cluster (Ethiopia-Specific LLM Intelligence Report) ---
+def summarize_cluster_ethiopia(texts, urls, cluster_data, min_ts, max_ts):
+    joined = "\n".join(texts[:50])
+    url_context = "\nRelevant post links:\n" + "\n".join(urls[:5]) if urls else ""
+    prompt = f"""
+Generate a structured intelligence report on online narratives related to the election in Ethiopia.
+Focus on pre and post-election tensions and emerging narratives, including:
+- Ethnic/identity-based tensions (Amhara, Oromo, Tigrayan, Somali, Afar, Sidama, etc.)
+- Political party dynamics (Prosperity Party, Fano, OLA/ONEG, TPLF, NEBE)
+- Electoral integrity (fraud allegations, voter suppression, NEBE bias, tally center issues)
+- Violence, incitement, or hate speech (including Amharic/English trigger terms)
+- Foreign interference or geopolitical narratives (Egypt, Sudan, Eritrea, US, China)
+- Calls for protests, boycotts, or civic resistance
+- Viral slogans, hashtags, or coordinated messaging
+**Strict Instructions:**
+- Only report claims **explicitly present** in the provided posts.
+- Identify **originators**: accounts that first posted the core claim (from cluster_data).
+- Note **amplification**: how widely it spread (Total posts).
+- Do NOT invent, cut out, assume, or fact-check.
+- Summarize clearly and concisely.
+**Output Format:**
+Narrative Title: [Short, descriptive title]
+Core Claim(s): [Bullet points]
+Originator(s): [Account IDs or "Unknown"]
+Amplification: [Total posts in cluster]
+First Detected: {min_ts}
+Last Updated: {max_ts}
+Documents:
+{joined}{url_context}
+"""    
+    response = safe_llm_call(prompt, max_tokens=2048)
+    if not response:
+        return "⚠️ No summary generated (LLM unavailable or rate limited)."
+        
+    # Clean LLM output
+    cleaned = re.sub(r'\*\*.*?Instructions.*?\*\*', '', response, flags=re.IGNORECASE | re.DOTALL)
+    cleaned = re.sub(r'```.*?```', '', cleaned, flags=re.DOTALL)
+    cleaned = re.sub(r'###|##|#', '', cleaned)
+    return cleaned.strip()
+
+def get_ethiopia_summaries(df_clustered_all, filtered_df):
+    """Generates LLM-powered summaries for top narrative clusters"""
+    if df_clustered_all.empty or 'cluster' not in df_clustered_all.columns:
+        return []
+        
+    cluster_sizes = df_clustered_all[df_clustered_all['cluster'] != -1].groupby('cluster').size()
+    top_15_clusters = cluster_sizes.nlargest(15).index.tolist()
+    all_summaries = []
+    
+    for cluster_id in top_15_clusters:
+        cluster_posts = df_clustered_all[df_clustered_all['cluster'] == cluster_id]
+        
+        # Use all posts for text aggregation
+        all_texts = [t for t in cluster_posts['object_id'].astype(str) if len(t.strip()) > 10]
+        if not all_texts: continue
+            
+        total_reach = len(cluster_posts)
+        originators = cluster_posts.sort_values('timestamp_share')['account_id'].dropna().unique().tolist()[:5] or ["Unknown"]
+        
+        min_ts = cluster_posts['timestamp_share'].min()
+        max_ts = cluster_posts['timestamp_share'].max()
+        min_ts_str = min_ts.strftime('%Y-%m-%d') if pd.notna(min_ts) else 'N/A'
+        max_ts_str = max_ts.strftime('%Y-%m-%d') if pd.notna(max_ts) else 'N/A'
+        
+        raw_response = summarize_cluster_ethiopia(
+            all_texts, 
+            cluster_posts['URL'].dropna().unique().tolist(), 
+            cluster_posts, 
+            min_ts_str, 
+            max_ts_str
+        )
+        
+        all_summaries.append({
+            "cluster_id": cluster_id,
+            "Context": raw_response,
+            "Originators": ", ".join([str(a) for a in originators]),
+            "Amplifiers_Count": len(cluster_posts['account_id'].dropna().unique()),
+            "Total_Reach": total_reach,
+            "Emerging Virality": assign_virality_tier(total_reach),
+            "Top_Platforms": ", ".join([f"{p} ({c})" for p, c in cluster_posts['Platform'].value_counts().head(3).items()]),
+            "Min_TS": min_ts,
+            "Max_TS": max_ts,
+            "Posts_Data": cluster_posts
+        })
+    return all_summaries
 
 def convert_df_to_csv(df): return df.to_csv(index=False).encode('utf-8')
 
@@ -1058,40 +1144,25 @@ def main():
     # Clustering
     df_clustered = cached_clustering(filtered_df, eps=0.3, min_samples=2, max_features=5000) if not filtered_df.empty else pd.DataFrame()
 
-    def generate_simple_summaries(df_clustered, filtered_df):
-        """Lightweight summary generation for sidebar (no LLM required)"""
-        summaries = []
-        if df_clustered.empty or 'cluster' not in df_clustered.columns:
-            return summaries
-        
-        # Get cluster sizes
-        cluster_sizes = df_clustered[df_clustered['cluster'] != -1].groupby('cluster').size()
-        
-        for cluster_id in cluster_sizes.index[:10]:  # Top 10 clusters
-            cluster_posts = df_clustered[df_clustered['cluster'] == cluster_id]
-            count = len(cluster_posts)
-            
-            # Extract a representative text snippet
-            sample_text = cluster_posts['original_text'].iloc[0][:150] + "..." if len(cluster_posts) > 0 else "No content"
-            
-            # Determine virality tier
-            virality = assign_virality_tier(count)
-            
-            # Get platform diversity
-            platforms = cluster_posts['Platform'].dropna().unique()
-            
-            summaries.append({
-                'cluster_id': cluster_id,
-                'count': count,
-                'virality': virality,
-                'platforms': len(platforms),
-                'sample_text': sample_text,
-                'top_platform': platforms[0] if len(platforms) > 0 else 'Unknown'
-            })
-        
-        return summaries
+    # LLM-Powered Narrative Summarization Pipeline
+    st.sidebar.info("🤖 Generating narrative summaries via LLM...")
+    all_summaries = get_ethiopia_summaries(df_clustered, filtered_df)
+    if not all_summaries:
+        st.sidebar.warning("⚠️ No narrative clusters generated. Check data volume or LLM API status.")
     
-    all_summaries = generate_simple_summaries(df_clustered, filtered_df)
+    # ==========================================
+    #  FILTERING LOGIC (Remove noise/positive)
+    # ==========================================
+    noise_indicators = ["no relevant claims", "no explicit claims", "no summary generated", "llm unavailable"]
+    filtered_summaries = []
+    for s in all_summaries:
+        context = str(s.get("Context", "")).lower()
+        # Skip noise or empty summaries
+        if any(ind in context for ind in noise_indicators):
+            continue
+        filtered_summaries.append(s)
+    all_summaries = filtered_summaries
+
 
     # Metrics
     total_posts = len(filtered_df)
@@ -1099,126 +1170,12 @@ def main():
     top_platform = filtered_df['Platform'].mode()[0] if not filtered_df['Platform'].mode().empty else "—"
     clusters_found = len(df_clustered[df_clustered['cluster'] != -1]['cluster'].unique()) if not df_clustered.empty else 0
 
-    # =============================================================================
-    # 🎛️ ENHANCED SIDEBAR: Live Data Insights (Ethiopia-Compatible + New Features)
-    # =============================================================================
-    with st.sidebar:
-        # --- Header ---
-        #st.markdown("### 📊 Data Overview")
-        #st.caption(f"Last updated: {pd.Timestamp.now(tz='UTC').strftime('%Y-%m-%d %H:%M UTC')}")
-        #st.divider()
         
-        # --- Key Metrics Grid ---
-        m1, m2 = st.columns(2)
-        m1.metric("Posts Analyzed", f"{len(filtered_df):,}")
-        m2.metric("Original Posts", f"{len(filtered_original):,}")  # ✅ Now works!
-        
-        m3, m4 = st.columns(2)
-        m3.metric("Unique Accounts", f"{filtered_df['account_id'].nunique():,}" if not filtered_df.empty else "—")
-        m4.metric("Active Narratives", f"{len(all_summaries):,}")  # ✅ Now works!
-        
-        st.divider()
-        
-        # --- Data Sources (Raw Count) ---
-        st.markdown("### 📁 Source Distribution (Raw)")
-        if 'source_dataset' in combined_raw.columns and not combined_raw.empty:
-            source_counts = combined_raw['source_dataset'].value_counts()
-            for src, count in source_counts.items():
-                pct = count / len(combined_raw) if len(combined_raw) > 0 else 0
-                st.progress(pct, text=f"{src}: {count:,} ({pct:.0%})")
-        else:
-            st.caption("ℹ️ No source data available")
-        
-        st.divider()
-        
-        # --- Platform Breakdown (Filtered) ---
-        st.markdown("### 📱 Platform Breakdown (Filtered)")
-        if not filtered_df.empty and 'Platform' in filtered_df.columns:
-            platform_counts = filtered_df['Platform'].value_counts()
-            for platform, count in platform_counts.items():
-                pct = count / len(filtered_df)
-                st.progress(pct, text=f"{platform}: {count:,} ({pct:.0%})")
-        else:
-            st.caption("ℹ️ No platform data available")
-        
-        st.divider()
-        
-        # --- Narrative Virality Distribution (from all_summaries) ---
-        if all_summaries:
-            st.markdown("### 📈 Narrative Virality")
-            virality_counts = Counter([s['virality'] for s in all_summaries])
-            for tier in ["Tier 4: Viral Emergency", "Tier 3: High Spread", "Tier 2: Moderate", "Tier 1: Limited"]:
-                count = virality_counts.get(tier, 0)
-                if count > 0:
-                    pct = count / len(all_summaries)
-                    icon = {"Tier 4: Viral Emergency": "🚨", "Tier 3: High Spread": "🔴", 
-                           "Tier 2: Moderate": "🟡", "Tier 1: Limited": "🟢"}.get(tier, "⚪")
-                    st.progress(pct, text=f"{icon} {tier.split(':')[0]}: {count}")
-        
-        st.divider()
-        
-        # --- Sentiment Distribution (if available) ---
-        #if 'Sentiment' in filtered_df.columns and not filtered_df.empty:
-          #  st.markdown("### 😊 Sentiment Split")
-          #  sentiment_counts = filtered_df['Sentiment'].value_counts()
-          #  for sentiment, count in sentiment_counts.items():
-           #     pct = count / len(filtered_df)
-           #     emoji = {"Negative": "🔴", "Neutral": "🟡", "Positive": "🟢"}.get(sentiment, "⚪")
-           #     st.progress(pct, text=f"{emoji} {sentiment}: {count:,} ({pct:.0%})")
-        
-       # st.divider()
-        
-        # --- Date Range Info ---
-        #st.markdown("### 📅 Active Filter")
-        #if len(selected_range) == 2:
-        #    st.caption(f"{selected_range[0]} → {selected_range[1]}")
-        #else:
-          #  st.caption(f"Single day: {selected_range[0]}")
-        
-        #if not filtered_df.empty and 'timestamp_share' in filtered_df.columns:
-          #  valid_ts = filtered_df['timestamp_share'].dropna()
-          #  if not valid_ts.empty:
-           #     st.caption(f"Posts in range: {len(valid_ts):,}")
-        
-        #st.divider()
-        
-        # --- Export Section ---
-        st.markdown("### 📥 Export Data")
-        if not filtered_df.empty:
-            st.download_button(
-                label="📄 Download Filtered CSV",
-                data=convert_df_to_csv(filtered_df),
-                file_name="ethiopia_election_filtered.csv",
-                mime="text/csv",
-                width='stretch'
-            )
-            if not filtered_original.empty and len(filtered_original) != len(filtered_df):
-                st.download_button(
-                    label="📄 Download Original Posts Only",
-                    data=convert_df_to_csv(filtered_original),
-                    file_name="ethiopia_original_posts.csv",
-                    mime="text/csv",
-                    width='stretch'
-                )
-        
-        st.markdown("---")
-        
-        # --- About / Footer ---
-        st.markdown("### ℹ️ About")
-        st.caption("""
-        Ethiopia Election Monitor 
-        • Lexicon management
-        • Amharic/English support
-        • Risk scoring & coordination detection
-        
-        Built with Streamlit • Code for Africa
-        """)
-        
-        # === TABS ===
-        tabs = st.tabs([
-            "🏠 Dashboard", "📊 Insights", "🔍 Coordination", "⚠️ Risk", "📰 Narratives",
-            "🕸️ Network Intelligence", "🎯 Triggers & Entities"
-        ])
+    # === TABS ===
+    tabs = st.tabs([
+        "🏠 Dashboard", "📊 Insights", "🔍 Coordination", "⚠️ Risk", "📰 Narratives",
+        "🕸️ Network Intelligence", "🎯 Triggers & Entities"
+    ])
     
     # === TAB 1: Dashboard ===
     with tabs[0]:
