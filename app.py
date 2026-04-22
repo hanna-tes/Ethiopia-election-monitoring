@@ -1367,21 +1367,20 @@ def main():
         if not df_clustered.empty:
             sizes = df_clustered[df_clustered['cluster'] != -1].groupby('cluster').size()
             if not sizes.empty:
-                # 🔍 DEBUG: Print values to terminal
-                logger.info(f"🔍 Risk Tab Debug - sizes.values: {sizes.values}")
-                logger.info(f"🔍 Risk Tab Debug - sizes.values type: {type(sizes.values)}")
+                # 🔍 DEBUG: Print exact values to terminal
+                logger.info(f"🔍 Risk Debug - Counts: {sizes.values}")
+                logger.info(f"🔍 Risk Debug - Count type: {type(sizes.values[0])}")
                 
                 virality_values = []
-                for i, c in enumerate(sizes.values):
+                for c in sizes.values:
                     try:
                         v = assign_virality_tier(int(c))
                     except Exception as e:
-                        logger.warning(f"⚠️ assign_virality_tier failed for value {c} (index {i}): {e}")
+                        logger.warning(f"⚠️ Virality tier failed for {c}: {e}")
                         v = "Tier 1: Limited"
                     virality_values.append(v)
-                    logger.info(f"🔍 Risk Tab Debug - count={c} → virality='{v}'")
                 
-                logger.info(f"🔍 Risk Tab Debug - Unique virality values: {set(virality_values)}")
+                logger.info(f"🔍 Risk Debug - Unique Virality Values: {set(virality_values)}")
                 
                 risk_df = pd.DataFrame({
                     'Cluster': sizes.index, 
@@ -1389,26 +1388,29 @@ def main():
                     'Virality': virality_values
                 })
                 
-                # 🔍 DEBUG: Show first few rows of risk_df
-                logger.info(f"🔍 Risk Tab Debug - risk_df head:\n{risk_df.head().to_string()}")
-                    
-                    # ✅ FIX: Explicit color mapping + category order for ALL tiers
-                    fig = px.bar(
-                        risk_df.nlargest(10, 'Count'), 
-                        x='Cluster', 
-                        y='Count', 
-                        color='Virality', 
-                        title="Top Clusters by Volume",
-                        color_discrete_map={
-                            "Tier 1: Limited": "#94a3b8",
-                            "Tier 2: Moderate": "#3b82f6", 
-                            "Tier 3: High Spread": "#f59e0b",
-                            "Tier 4: Viral Emergency": "#dc2626"
-                        },
-                        category_orders={"Virality": ["Tier 1: Limited", "Tier 2: Moderate", "Tier 3: High Spread", "Tier 4: Viral Emergency"]}
-                    )
-                    st.plotly_chart(fig, width='stretch')
-                    st.dataframe(risk_df.nlargest(10, 'Count'), width='stretch')
+                # ✅ Dynamic color map to prevent KeyError
+                default_colors = {
+                    "Tier 1: Limited": "#94a3b8",
+                    "Tier 2: Moderate": "#3b82f6", 
+                    "Tier 3: High Spread": "#f59e0b",
+                    "Tier 4: Viral Emergency": "#dc2626"
+                }
+                dynamic_colors = {v: default_colors.get(v, "#64748b") for v in set(virality_values)}
+                
+                fig = px.bar(
+                    risk_df.nlargest(10, 'Count'), 
+                    x='Cluster', 
+                    y='Count', 
+                    color='Virality', 
+                    title="Top Clusters by Volume",
+                    color_discrete_map=dynamic_colors
+                )
+                st.plotly_chart(fig, width='stretch')
+                st.dataframe(risk_df.nlargest(10, 'Count'), width='stretch')
+            else:
+                st.info("ℹ️ No cluster data available for risk assessment")
+        else:
+            st.info("ℹ️ No clustering data available")
             
     # === TAB 5: Narratives ===
     with tabs[4]:
