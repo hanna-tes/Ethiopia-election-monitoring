@@ -758,37 +758,242 @@ def extract_targeted_entities(df, text_col='original_text', account_col='account
     aggregated['mention_count'] = entity_df.groupby('entity').size().values
     return aggregated.sort_values('mention_count', ascending=False)
 
-# --- Professional UI Theme ---
+# --- Professional UI Theme (Light/Dark Mode Support) ---
 def inject_custom_css():
     st.markdown("""
     <style>
-        .stApp { background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%); }
-        .main .block-container { padding-top: 1rem; padding-bottom: 2rem; }
-        h1, h2, h3 { color: #1e293b; font-weight: 600; }
-        .stTabs [data-baseweb="tab"] { 
-            background: white; border-radius: 8px 8px 0 0; 
-            padding: 0.8rem 1.2rem; font-weight: 500; color: #475569;
+        /* ===== CSS VARIABLES FOR THEME ===== */
+        :root {
+            /* Light mode defaults */
+            --bg-primary: #FFFFFF;
+            --bg-secondary: #F8FAFC;
+            --bg-tertiary: #F1F5F9;
+            --text-primary: #0F172A;
+            --text-secondary: #475569;
+            --text-muted: #94A3B8;
+            --border-color: #E2E8F0;
+            --primary: #2563EB;          /* Professional Blue */
+            --primary-hover: #1D4ED8;
+            --success: #059669;          /* Emerald Green */
+            --warning: #D97706;          /* Amber */
+            --error: #DC2626;            /* Red */
+            --critical: #7C2D12;         /* Deep Red for critical */
+            --card-shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
+            --hover-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
         }
-        .stTabs [aria-selected="true"] { 
-            background: #3b82f6; color: white !important; 
-            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+
+        /* Dark mode overrides */
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg-primary: #0F172A;
+                --bg-secondary: #1E293B;
+                --bg-tertiary: #334155;
+                --text-primary: #F8FAFC;
+                --text-secondary: #CBD5E1;
+                --text-muted: #64748B;
+                --border-color: #475569;
+                --primary: #3B82F6;
+                --primary-hover: #60A5FA;
+                --success: #10B981;
+                --warning: #F59E0B;
+                --error: #EF4444;
+                --critical: #F97316;
+                --card-shadow: 0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
+                --hover-shadow: 0 4px 6px -1px rgba(0,0,0,0.3), 0 2px 4px -1px rgba(0,0,0,0.2);
+            }
         }
-        .metric-card { 
-            background: white; border-radius: 12px; padding: 1.2rem; 
-            box-shadow: 0 4px 12px rgba(0,0,0,0.08); border-left: 4px solid #3b82f6;
+
+        /* ===== GLOBAL APP STYLES ===== */
+        .stApp {
+            background-color: var(--bg-secondary);
+            color: var(--text-primary);
         }
-        .dataframe { border-radius: 8px; overflow: hidden; }
-        .stButton>button { 
-            background: #3b82f6; color: white; border: none; 
-            border-radius: 6px; padding: 0.5rem 1.2rem; font-weight: 500;
+        
+        /* Typography */
+        h1, h2, h3, h4, h5, h6 {
+            color: var(--text-primary) !important;
+            font-weight: 600;
+            letter-spacing: -0.025em;
         }
-        .stButton>button:hover { background: #2563eb; }
-        .amharic { font-family: 'Nyala', 'Kefa', 'Noto Sans Ethiopic', sans-serif; }
+        p, span, div, label {
+            color: var(--text-primary);
+        }
+        .stCaption, .stHelp, small {
+            color: var(--text-muted) !important;
+        }
+
+        /* ===== CARDS & CONTAINERS ===== */
+        .metric-card, .stMetric {
+            background: var(--bg-primary) !important;
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 1rem;
+            box-shadow: var(--card-shadow);
+            transition: box-shadow 0.2s ease;
+        }
+        .stMetric:hover {
+            box-shadow: var(--hover-shadow);
+        }
+        .stMetric label {
+            color: var(--text-secondary) !important;
+            font-size: 0.875rem;
+        }
+        .stMetric div[data-testid="stMetricValue"] {
+            color: var(--text-primary) !important;
+            font-weight: 600;
+        }
+
+        /* ===== BUTTONS ===== */
+        .stButton > button {
+            background-color: var(--primary);
+            color: white !important;
+            border: none;
+            border-radius: 8px;
+            padding: 0.5rem 1.25rem;
+            font-weight: 500;
+            box-shadow: var(--card-shadow);
+            transition: all 0.2s ease;
+        }
+        .stButton > button:hover {
+            background-color: var(--primary-hover);
+            box-shadow: var(--hover-shadow);
+            transform: translateY(-1px);
+        }
+        .stButton > button:active {
+            transform: translateY(0);
+        }
+        /* Secondary button style */
+        .stButton > button[kind="secondary"] {
+            background-color: transparent;
+            color: var(--primary) !important;
+            border: 1px solid var(--border-color);
+        }
+        .stButton > button[kind="secondary"]:hover {
+            background-color: var(--bg-tertiary);
+        }
+
+        /* ===== TABS ===== */
+        .stTabs [data-baseweb="tab"] {
+            background: var(--bg-primary);
+            border-radius: 8px 8px 0 0;
+            padding: 0.75rem 1rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s ease;
+        }
+        .stTabs [aria-selected="true"] {
+            background: var(--bg-primary);
+            color: var(--primary) !important;
+            border-bottom-color: var(--primary);
+            font-weight: 600;
+        }
+        .stTabs [data-baseweb="tab"]:hover {
+            color: var(--text-primary);
+        }
+
+        /* ===== DATAFRAMES & TABLES ===== */
+        .stDataFrame {
+            background: var(--bg-primary) !important;
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: var(--card-shadow);
+        }
+        .stDataFrame th {
+            background-color: var(--bg-tertiary) !important;
+            color: var(--text-secondary) !important;
+            font-weight: 600;
+            border-bottom: 1px solid var(--border-color) !important;
+        }
+        .stDataFrame td {
+            color: var(--text-primary) !important;
+            border-bottom: 1px solid var(--border-color) !important;
+        }
+        .stDataFrame tr:hover {
+            background-color: var(--bg-tertiary) !important;
+        }
+
+        /* ===== ALERTS & STATUS MESSAGES ===== */
+        .stAlert {
+            background-color: var(--bg-primary) !important;
+            border-left: 4px solid var(--primary);
+            border-radius: 0 8px 8px 0;
+            color: var(--text-primary) !important;
+            box-shadow: var(--card-shadow);
+        }
+        .stAlert-success { border-left-color: var(--success); }
+        .stAlert-warning { border-left-color: var(--warning); }
+        .stAlert-error { border-left-color: var(--error); }
+        .stAlert-info { border-left-color: var(--primary); }
+
+        /* ===== INPUTS & SELECTORS ===== */
+        .stTextInput input, .stSelectbox select, .stMultiselect input {
+            background-color: var(--bg-primary) !important;
+            color: var(--text-primary) !important;
+            border: 1px solid var(--border-color) !important;
+            border-radius: 8px;
+        }
+        .stTextInput input:focus, .stSelectbox select:focus {
+            border-color: var(--primary) !important;
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+
+        /* ===== CHARTS (Plotly) ===== */
+        .plotly-chart svg, .plotly-chart .main-svg {
+            background-color: var(--bg-primary) !important;
+        }
+        .plotly-chart .xtick > text, .plotly-chart .ytick > text {
+            fill: var(--text-secondary) !important;
+        }
+        .plotly-chart .title > text {
+            fill: var(--text-primary) !important;
+            font-weight: 600;
+        }
+        .plotly-chart .legend > text {
+            fill: var(--text-secondary) !important;
+        }
+
+        /* ===== EXPANDERS & SECTIONS ===== */
+        .streamlit-expanderHeader {
+            background-color: var(--bg-primary) !important;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: var(--text-primary) !important;
+            font-weight: 500;
+        }
+        .streamlit-expanderContent {
+            background-color: var(--bg-secondary) !important;
+            border: 1px solid var(--border-color);
+            border-top: none;
+            border-radius: 0 0 8px 8px;
+            padding: 1rem;
+        }
+
+        /* ===== AMHARIC TEXT SUPPORT ===== */
+        .amharic, [lang="am"], [lang="amh"] {
+            font-family: 'Nyala', 'Kefa', 'Noto Sans Ethiopic', 'Abyssinica SIL', sans-serif;
+            line-height: 1.6;
+        }
+
+        /* ===== UTILITY CLASSES ===== */
+        .text-muted { color: var(--text-muted); }
+        .text-success { color: var(--success); }
+        .text-warning { color: var(--warning); }
+        .text-error { color: var(--error); }
+        .text-critical { color: var(--critical); font-weight: 600; }
+        
+        .border-light { border: 1px solid var(--border-color); border-radius: 8px; }
+        .bg-card { background: var(--bg-primary); border-radius: 10px; padding: 1rem; box-shadow: var(--card-shadow); }
+        
+        /* ===== SCROLLBAR (subtle) ===== */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: var(--bg-secondary); }
+        ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
     </style>
     """, unsafe_allow_html=True)
-
-inject_custom_css()
-
+    
 # --- Main App ---
 def main():
     st.set_page_config(layout="wide", page_title="🇪🇹 Ethiopia Election Monitor", page_icon="🗳️")
