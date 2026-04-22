@@ -192,7 +192,7 @@ except Exception as e:
 CFA_LOGO_URL = "https://opportunities.codeforafrica.org/wp-content/uploads/sites/5/2015/11/1-Zq7KnTAeKjBf6eENRsacSQ.png"
 
 # Define the data directory path
-DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+#DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 
 # Update URL variables to local file paths
 #MELTWATER_URL = os.path.join(DATA_DIR, "MeltwaterEthiopiaMar8.csv")
