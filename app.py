@@ -1697,22 +1697,59 @@ def main():
         # --- Sub-tab 1: Trigger Scanner ---
         with sub_tabs[0]:
             st.markdown("### 🔍 Real-Time Trigger Detection")
+            
+            # Show lexicon stats
             lexicon_df = get_lexicon_as_dataframe()
             total_terms = len(lexicon_df)
             st.info(f"✅ Lexicon contains {total_terms:,} terms across {len(CONFIG['lexicon'])} categories")
             
-            # Test text input
-            test_text = st.text_area("Paste text to scan for hate speech terms", height=100, placeholder="Example: የወያኔ ድስት ላሺ...")
-            if test_text and st.button("🔎 Scan Text"):
-                matches = scan_text_for_lexicon_terms(test_text)
-                risk = calculate_risk_score(matches)
-                if matches:
-                    st.error(f"🚨 Found {len(matches)} hate speech term(s)")
-                    risk_color = {'low': '✅', 'medium': '⚠️', 'high': '🔴', 'critical': '🚨'}
-                    st.markdown(f"**Risk Level:** {risk_color.get(risk['level'], '⚪')} {risk['level'].upper()} (Score: {risk['score']})")
-                    st.dataframe(pd.DataFrame(matches)[['term', 'category', 'severity', 'target_entity']], use_container_width=True, hide_index=True)
+            # Test text input with clear instructions
+            test_text = st.text_area(
+                "Paste text to scan for hate speech terms", 
+                height=100, 
+                placeholder="Example: የወያኔ ድስት ላሺ... or 'Kill them all'",
+                key="trigger_scanner_input"
+            )
+            
+            if st.button("🔎 Scan Text", key="scan_button"):
+                if not test_text.strip():
+                    st.warning("⚠️ Please enter text to scan")
                 else:
-                    st.success("✅ No lexicon matches found")
+                    with st.spinner("🔍 Scanning for trigger terms..."):
+                        # Scan the text
+                        matches = scan_text_for_lexicon_terms(test_text)
+                        
+                        if matches:
+                            # Calculate risk
+                            risk = calculate_risk_score(matches)
+                            
+                            # ✅ CLEAR FEEDBACK WITH RISK LEVEL
+                            risk_color = {'low': '✅', 'medium': '⚠️', 'high': '🔴', 'critical': '🚨'}
+                            risk_emoji = risk_color.get(risk['level'], '⚪')
+                            
+                            st.markdown(f"### {risk_emoji} Risk Assessment: {risk['level'].upper()}")
+                            st.markdown(f"**Risk Score:** {risk['score']} / 15")
+                            
+                            # Show matched terms
+                            st.markdown("**🔍 Matched Trigger Terms:**")
+                            matches_df = pd.DataFrame(matches)[['term', 'category', 'severity', 'target_entity']]
+                            st.dataframe(matches_df, use_container_width=True, hide_index=True)
+                            
+                            # Show risk breakdown
+                            if risk['breakdown']:
+                                st.markdown("**📊 Risk by Category:**")
+                                for cat, score in risk['breakdown'].items():
+                                    st.markdown(f"- {cat.replace('_', ' ').title()}: {score:.1f}")
+                            
+                            # Final verdict
+                            if risk['level'] in ['high', 'critical']:
+                                st.error(f"🚨 This text contains **{risk['term_count']} hateful/harmful trigger terms**. Review recommended.")
+                            elif risk['level'] == 'medium':
+                                st.warning(f"⚠️ This text contains **{risk['term_count']} potentially harmful terms**. Monitor closely.")
+                            else:
+                                st.success(f"✅ This text has **{risk['term_count']} low-risk terms**. Generally acceptable.")
+                        else:
+                            st.success("✅ No lexicon matches found — text appears clean based on current trigger list")
             
             st.divider()
             
@@ -1757,22 +1794,56 @@ def main():
         # --- Sub-tab 3: Analytics ---
         with sub_tabs[2]:
             st.markdown("### 📊 Lexicon Analytics")
-            analytics = generate_lexicon_analytics(filtered_df)
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Total Lexicon Terms", f"{len(get_lexicon_as_dataframe()):,}")
-            col2.metric("Posts with Matches", f"{analytics['posts_with_matches']:,}")
-            col3.metric("Total Matches", f"{analytics['total_matches']:,}")
             
-            if analytics['category_distribution']:
-                cat_df = pd.DataFrame([{'category': cat.replace('_', ' ').title(), 'count': cnt} for cat, cnt in analytics['category_distribution'].items()]).sort_values('count', ascending=False)
-                fig = px.pie(cat_df, values='count', names='category', title="Triggers by Category")
-                st.plotly_chart(fig, width='stretch')
+            # ✅ ADD WORDCLOUD OF TOP TRIGGER TERMS
+            if not filtered_df.empty and 'original_text' in filtered_df.columns:
+                with st.spinner("🎨 Generating trigger word cloud..."):
+                    # Scan all posts for lexicon matches
+                    all_matches = []
+                    for _, row in filtered_df.iterrows():
+                        text = str(row.get('original_text', ''))
+                        matches = scan_text_for_lexicon_terms(text)
+                        all_matches.extend(matches)
+                    
+                    if all_matches:
+                        # Aggregate by term with frequency and severity
+                        term_data = defaultdict(lambda: {'count': 0, 'severity': 'medium'})
+                        for match in all_matches:
+                            term = match['term']
+                            term_data[term]['count'] += 1
+                            # Use highest severity if term appears with multiple levels
+                            current_sev = term_data[term]['severity']
+                            new_sev = match['severity']
+                            severity_order = {'low': 1, 'medium': 2, 'high': 3, 'critical': 4}
+                            if severity_order.get(new_sev, 2) > severity_order.get(current_sev, 2):
+                                term_data[term]['severity'] = new_sev
+                        
+                        # Prepare data for wordcloud (frequency-based sizing)
+                        word_freq = {term: data['count'] for term, data in term_data.items()}
+                        
+                        # Generate and display wordcloud
+                        wordcloud = generate_trigger_wordcloud(
+                            {'top_terms': [{'term': t, 'count': c} for t, c in word_freq.items()]},
+                            width=800, height=400
+                        )
+                        if wordcloud:
+                            img_base64 = wordcloud_to_base64(wordcloud)
+                            st.image(f"data:image/png;base64,{img_base64}", caption="🔥 Top Trigger Terms by Frequency", use_container_width=True)
+                        
+                        # Show top terms table below wordcloud
+                        top_terms = sorted(term_data.items(), key=lambda x: x[1]['count'], reverse=True)[:15]
+                        st.markdown("**Top 15 Trigger Terms**")
+                        term_df = pd.DataFrame([
+                            {'Term': term, 'Mentions': data['count'], 'Severity': data['severity'].title()}
+                            for term, data in top_terms
+                        ])
+                        st.dataframe(term_df, use_container_width=True, hide_index=True)
+                    else:
+                        st.info("ℹ️ No lexicon matches found in current date range")
+            else:
+                st.info("ℹ️ No data available for trigger analysis")
             
-            if analytics['temporal_trend']:
-                trend_df = pd.DataFrame([{'date': d, 'matches': c} for d, c in analytics['temporal_trend'].items()])
-                trend_df['date'] = pd.to_datetime(trend_df['date'])
-                fig = px.area(trend_df, x='date', y='matches', title="Daily Trigger Mentions")
-                st.plotly_chart(fig, width='stretch')
+            st.divider()
         
         # === ✨ NEW: Sub-tab 4: Lexicon Management ===
         with sub_tabs[3]:
