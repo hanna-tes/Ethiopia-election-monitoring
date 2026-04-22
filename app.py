@@ -1104,9 +1104,9 @@ def main():
     # =============================================================================
     with st.sidebar:
         # --- Header ---
-        st.markdown("### 📊 Data Overview")
-        st.caption(f"Last updated: {pd.Timestamp.now(tz='UTC').strftime('%Y-%m-%d %H:%M UTC')}")
-        st.divider()
+        #st.markdown("### 📊 Data Overview")
+        #st.caption(f"Last updated: {pd.Timestamp.now(tz='UTC').strftime('%Y-%m-%d %H:%M UTC')}")
+        #st.divider()
         
         # --- Key Metrics Grid ---
         m1, m2 = st.columns(2)
@@ -1158,29 +1158,29 @@ def main():
         st.divider()
         
         # --- Sentiment Distribution (if available) ---
-        if 'Sentiment' in filtered_df.columns and not filtered_df.empty:
-            st.markdown("### 😊 Sentiment Split")
-            sentiment_counts = filtered_df['Sentiment'].value_counts()
-            for sentiment, count in sentiment_counts.items():
-                pct = count / len(filtered_df)
-                emoji = {"Negative": "🔴", "Neutral": "🟡", "Positive": "🟢"}.get(sentiment, "⚪")
-                st.progress(pct, text=f"{emoji} {sentiment}: {count:,} ({pct:.0%})")
+        #if 'Sentiment' in filtered_df.columns and not filtered_df.empty:
+          #  st.markdown("### 😊 Sentiment Split")
+          #  sentiment_counts = filtered_df['Sentiment'].value_counts()
+          #  for sentiment, count in sentiment_counts.items():
+           #     pct = count / len(filtered_df)
+           #     emoji = {"Negative": "🔴", "Neutral": "🟡", "Positive": "🟢"}.get(sentiment, "⚪")
+           #     st.progress(pct, text=f"{emoji} {sentiment}: {count:,} ({pct:.0%})")
         
-        st.divider()
+       # st.divider()
         
         # --- Date Range Info ---
-        st.markdown("### 📅 Active Filter")
-        if len(selected_range) == 2:
-            st.caption(f"{selected_range[0]} → {selected_range[1]}")
-        else:
-            st.caption(f"Single day: {selected_range[0]}")
+        #st.markdown("### 📅 Active Filter")
+        #if len(selected_range) == 2:
+        #    st.caption(f"{selected_range[0]} → {selected_range[1]}")
+        #else:
+          #  st.caption(f"Single day: {selected_range[0]}")
         
-        if not filtered_df.empty and 'timestamp_share' in filtered_df.columns:
-            valid_ts = filtered_df['timestamp_share'].dropna()
-            if not valid_ts.empty:
-                st.caption(f"Posts in range: {len(valid_ts):,}")
+        #if not filtered_df.empty and 'timestamp_share' in filtered_df.columns:
+          #  valid_ts = filtered_df['timestamp_share'].dropna()
+          #  if not valid_ts.empty:
+           #     st.caption(f"Posts in range: {len(valid_ts):,}")
         
-        st.divider()
+        #st.divider()
         
         # --- Export Section ---
         st.markdown("### 📥 Export Data")
@@ -1206,7 +1206,7 @@ def main():
         # --- About / Footer ---
         st.markdown("### ℹ️ About")
         st.caption("""
-        Ethiopia Election Monitor v1.2
+        Ethiopia Election Monitor 
         • Lexicon management
         • Amharic/English support
         • Risk scoring & coordination detection
@@ -1271,7 +1271,7 @@ def main():
                 risk_df = pd.DataFrame({
                     'Cluster': sizes.index, 
                     'Count': sizes.values, 
-                    'Virality': sizes.values.map(assign_virality_tier)
+                    'Virality': [assign_virality_tier(c) for c in sizes.values]
                 })
                 fig = px.bar(risk_df.nlargest(10, 'Count'), x='Cluster', y='Count', color='Virality', title="Top Clusters by Volume")
                 st.plotly_chart(fig, width='stretch')
