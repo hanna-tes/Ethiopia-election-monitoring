@@ -1067,7 +1067,7 @@ def main():
         m4.metric("Coordination Clusters", clusters_found)
         st.divider()
         if not filtered_df.empty:
-            plot_df = filtered_df.set_index('timestamp_share').resample('H').size()
+            plot_df = filtered_df.set_index('timestamp_share').resample('h').size()
             if not plot_df.empty:
                 fig = px.area(plot_df, title="Hourly Post Volume", labels={'value': 'Posts'})
                 st.plotly_chart(fig, use_container_width=True)
