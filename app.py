@@ -1527,7 +1527,7 @@ def main():
                 * 🟠 **Moderate:** Growing topics that require monitoring.
                 * 🟢 **Limited:** Small, niche conversations.
             
-            *Use this tab to prioritize which issues need a formal response or fact-check.*
+            *Use this tab to prioritize which issues needs our focus and further analysis.*
             """)
     
         if not df_clustered.empty:
