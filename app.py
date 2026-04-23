@@ -1632,112 +1632,74 @@ def main():
         # 📱 PLATFORM-SPECIFIC TRENDING (TELEGRAM & TikTok)
         # =============================================================================
         st.divider()
-        st.subheader("📱 Telegram and Tiktok Trending Content")
-        st.caption("Most recent trending posts from Telegram and TikTok")
+        st.subheader("📱 Platform Intelligence")
         
-        #  OpenMeasure = Telegram, TikTok = TikTok
-        telegram_posts = filtered_df[
-            (filtered_df['Platform'] == 'Telegram') | 
-            (filtered_df['source_dataset'] == 'OpenMeasure')
-        ].copy()
-        
-        tiktok_posts = filtered_df[
-            (filtered_df['Platform'] == 'TikTok') | 
-            (filtered_df['source_dataset'] == 'TikTok')
-        ].copy()
-        
-        # Create two columns for side-by-side view
+        # --- PREPARE DATA ---
+        telegram_posts = filtered_df[filtered_df['Platform'] == 'Telegram'].copy()
+        tiktok_posts = filtered_df[filtered_df['Platform'] == 'TikTok'].copy()
+
         col_telegram, col_tiktok = st.columns(2)
-        
-        # --- TELEGRAM  SECTION ---
+
+        # --- TELEGRAM SECTION ---
         with col_telegram:
-            st.markdown("#### 📱 Telegram Posts ")
-            
+            st.markdown("#### 📱 Recent Telegram Activity")
             if not telegram_posts.empty:
                 telegram_posts = telegram_posts.sort_values('timestamp_share', ascending=False)
-                
                 for _, row in telegram_posts.head(5).iterrows():
                     date_str = row['timestamp_share'].strftime('%m/%d %H:%M') if pd.notna(row['timestamp_share']) else 'N/A'
-                    account_str = str(row['account_id'])[:25]
+                    # Use channel name/username for the label
+                    label = str(row['account_id'])[:20]
                     
-                    with st.expander(f"📄 **{account_str}** • {date_str}"):
-                        st.markdown(f"**Account:** `{row['account_id']}`")
-                        if pd.notna(row['timestamp_share']):
-                            st.caption(f"📅 Posted: {row['timestamp_share'].strftime('%Y-%m-%d %H:%M')}")
-                        
-                        content = str(row['object_id']).strip()
-                        if len(content) > 150:
-                            st.markdown(f"**Message:** {content[:150]}...")
-                            with st.expander("📖 Read full message"):
-                                st.write(content)
-                        else:
-                            st.markdown(f"**Message:** {content}")
-                        
-                        if pd.notna(row['URL']) and row['URL'].startswith('http'):
-                            st.markdown(f"🔗 **[Open in Telegram]({row['URL']})**")
+                    with st.expander(f"📄 {label} • {date_str}"):
+                        st.write(f"**Content:** {str(row['object_id'])}")
+                        # THE URL FIX:
+                        if pd.notna(row['URL']) and str(row['URL']).startswith('t.me'):
+                            # Ensure t.me links have https prefix
+                            full_url = f"https://{row['URL']}" if not str(row['URL']).startswith('http') else row['URL']
+                            st.markdown(f"🔗 **[View Original Post]({full_url})**")
+                        elif pd.notna(row['URL']) and "http" in str(row['URL']):
+                            st.markdown(f"🔗 **[View Link]({row['URL']})**")
             else:
-                st.info("ℹ️ No Telegram posts (OpenMeasure) in current date range")
-        
+                st.info("No Telegram data found.")
+
         # --- TIKTOK SECTION ---
         with col_tiktok:
-            st.markdown("#### 🎵 TikTok Trending Insights")
-            
+            st.markdown("#### 🎵 TikTok Trends & Terms")
             if not tiktok_posts.empty:
-                # Sort by engagement if available
+                # 1. AGGREGATE TOP HASHTAGS
+                all_tags = []
+                for i in range(10):
+                    col_name = f'hashtag_{i}'
+                    if col_name in tiktok_posts.columns:
+                        all_tags.extend(tiktok_posts[col_name].dropna().tolist())
+                
+                if all_tags:
+                    top_tags = pd.Series(all_tags).value_counts().head(5)
+                    tag_cloud = " ".join([f"`#{tag}`" for tag in top_tags.index])
+                    st.write(f"**Top Hashtags:** {tag_cloud}")
+
+                # 2. AGGREGATE TOP TERMS (Keywords)
+                all_text = " ".join(tiktok_posts['object_id'].astype(str).tolist()).lower()
+                # Simple filter for words > 4 chars to get meaningful terms
+                words = [w for w in all_text.split() if len(w) > 4 and w.isalpha()]
+                if words:
+                    top_terms = pd.Series(words).value_counts().head(5)
+                    st.write(f"**Trending Terms:** {', '.join(top_terms.index)}")
+
+                st.divider()
+
+                # 3. TOP INDIVIDUAL POSTS
                 if 'playCount' in tiktok_posts.columns:
                     tiktok_posts = tiktok_posts.sort_values('playCount', ascending=False)
                 
-                for _, row in tiktok_posts.head(5).iterrows():
-                    account = str(row.get('account_id', 'Unknown'))[:30] if pd.notna(row.get('account_id')) else 'Unknown'
-                    date_str = row['timestamp_share'].strftime('%m/%d') if pd.notna(row.get('timestamp_share')) else 'N/A'
-                    
-                    with st.expander(f"🎵 **{account}** • {date_str}"):
-                        # Account info
-                        st.markdown(f"**Account:** `{account}`")
-                        
-                        # ✅ Display engagement metrics
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            if pd.notna(row.get('playCount')): 
-                                st.metric("Views", f"{int(row['playCount']):,}")
-                            if pd.notna(row.get('diggCount')): 
-                                st.metric("Likes", f"{int(row['diggCount']):,}")
-                        with col2:
-                            if pd.notna(row.get('commentCount')): 
-                                st.metric("Comments", f"{int(row['commentCount']):,}")
-                            if pd.notna(row.get('shareCount')): 
-                                st.metric("Shares", f"{int(row['shareCount']):,}")
-                        
-                        # ✅ Display hashtags from structured columns
-                        hashtags = []
-                        for i in range(13):  # Check hashtags/0 through hashtags/12
-                            hashtag_col = f'hashtags/{i}/name'
-                            if hashtag_col in row and pd.notna(row[hashtag_col]):
-                                hashtags.append(f"#{row[hashtag_col]}")
-                        
-                        if hashtags:
-                            st.markdown(f"**🔥 Top Hashtags:** {' '.join(hashtags[:8])}")  # Show first 8
-                        
-                        # ✅ Display text/caption if available
-                        if pd.notna(row.get('text')) and str(row['text']).strip():
-                            text_preview = str(row['text'])[:200]
-                            if len(str(row['text'])) > 200:
-                                text_preview += "..."
-                            st.markdown(f"**📝 Caption:** {text_preview}")
-                        
-                        # ✅ Language indicator
-                        if pd.notna(row.get('textLanguage')) and str(row.get('textLanguage', '')).strip() not in ['un', 'nan', '']:
-                            lang_map = {"am": "🇪 Amharic", "en": "🇬 English", "om": "🇹 Oromo", "so": "🇸🇴 Somali"}
-                            lang_display = lang_map.get(str(row['textLanguage']), str(row['textLanguage']).upper())
-                            st.caption(f"🌐 Language: {lang_display}")
-                        
-                        # ✅ Video link
-                        if pd.notna(row.get('URL')) and str(row['URL']).startswith('http'):
-                            st.markdown(f"🎬 **[Watch Video 🔗]({row['URL']})**")
-                        
-                        st.divider()
+                for _, row in tiktok_posts.head(3).iterrows():
+                    with st.expander(f"🎵 {str(row['account_id'])[:20]}..."):
+                        st.caption(f"📈 Views: {row.get('playCount', 0):,} | Likes: {row.get('diggCount', 0):,}")
+                        st.write(f"{str(row['object_id'])[:150]}...")
+                        if pd.notna(row['URL']):
+                            st.markdown(f"🎬 **[Watch Video]({row['URL']})**")
             else:
-                st.info("ℹ️ No TikTok posts in current date range")  
+                st.info("No TikTok data found.")  
                 
     # === TAB 6: Network & Coordination Intelligence ===
     with tabs[5]:
