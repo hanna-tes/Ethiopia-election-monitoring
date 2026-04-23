@@ -413,16 +413,18 @@ def parse_timestamp_robust(timestamp):
 def combine_social_media_data(meltwater_df, civicsignals_df, tiktok_df=None, openmeasures_df=None):
     combined = []
     def get_col(df, cols):
-        df_cols = [c.lower().strip() for c in df.columns]
+        # ✅ First try exact column name match (case-sensitive) — critical for TikTok's 'authorMeta/name'
         for col in cols:
-        if col in df.columns:
-            return df[col]
+            if col in df.columns:  # ✅ This line MUST be indented inside the for loop
+                return df[col]
+        
         # Then try normalized match (lowercase, stripped)
         df_cols = [c.lower().strip() for c in df.columns]
         for col in cols:
             norm = col.lower().strip()
             if norm in df_cols:
                 return df[df.columns[df_cols.index(norm)]]
+        
         return pd.Series([np.nan]*len(df), index=df.index)
     
     if meltwater_df is not None and not meltwater_df.empty:
