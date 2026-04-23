@@ -415,8 +415,14 @@ def combine_social_media_data(meltwater_df, civicsignals_df, tiktok_df=None, ope
     def get_col(df, cols):
         df_cols = [c.lower().strip() for c in df.columns]
         for col in cols:
+        if col in df.columns:
+            return df[col]
+        # Then try normalized match (lowercase, stripped)
+        df_cols = [c.lower().strip() for c in df.columns]
+        for col in cols:
             norm = col.lower().strip()
-            if norm in df_cols: return df[df.columns[df_cols.index(norm)]]
+            if norm in df_cols:
+                return df[df.columns[df_cols.index(norm)]]
         return pd.Series([np.nan]*len(df), index=df.index)
     
     if meltwater_df is not None and not meltwater_df.empty:
