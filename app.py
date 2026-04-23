@@ -472,12 +472,23 @@ def combine_social_media_data(meltwater_df, civicsignals_df, tiktok_df=None, ope
     
     if openmeasures_df is not None and not openmeasures_df.empty:
         om = pd.DataFrame()
-        om['account_id'] = get_col(openmeasures_df, ['context_name'])
-        om['content_id'] = get_col(openmeasures_df, ['id'])
-        om['object_id'] = get_col(openmeasures_df, ['text'])
+        # 1. Map columns using the names found in your Ethiopia CSV
+        om['account_id'] = get_col(openmeasures_df, ['context_name', 'channelusername', 'channeltitle'])
+        om['content_id'] = get_col(openmeasures_df, ['id', 'url'])
+        om['object_id'] = get_col(openmeasures_df, ['text', 'message', 'body'])
         om['URL'] = get_col(openmeasures_df, ['url'])
-        om['timestamp_share'] = get_col(openmeasures_df, ['created_at'])
-        om['source_dataset'] = 'OpenMeasure'
+        
+        # 2. Get the date column
+        raw_dates = get_col(openmeasures_df, ['created_at', 'date'])
+        
+        # 3. FIX: Remove the '@' so the dashboard can read the date properly
+        # This converts "Mar 20 @ 19:50" to "Mar 20 19:50"
+        om['timestamp_share'] = raw_dates.astype(str).str.replace(' @ ', ' ', regex=False)
+        
+        # 4. Use the source name that your platform mapper looks for
+        om['source_dataset'] = 'OpenMeasure_Telegram'
+        
+        # 5. FIX: Match the list name used at the top (combined, not combined_dfs)
         combined.append(om)
     
     return pd.concat(combined, ignore_index=True) if combined else pd.DataFrame()
