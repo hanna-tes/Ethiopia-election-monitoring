@@ -1515,6 +1515,21 @@ def main():
     # === TAB 4: Risk ===
     with tabs[3]:
         st.markdown("### ⚠️ Narrative Risk Overview")
+        
+        # --- NON-TECHNICAL EXPLANATION ---
+        with st.expander("ℹ️ What does this 'Risk' assessment mean?", expanded=True):
+            st.markdown("""
+            **This tab identifies which stories or 'narratives' are gaining the most traction across social media.**
+            * **Clusters:** Our system automatically groups similar posts together into 'clusters'. Each cluster represents a specific conversation or news story.
+            * **Volume (Count):** The higher the bar, the more people are talking about that specific topic.
+            * **Virality Tiers:** We categorize topics based on how fast they spread:
+                * 🔴 **Critical/High:** Fast-moving topics that are dominating the conversation.
+                * 🟠 **Moderate:** Growing topics that require monitoring.
+                * 🟢 **Limited:** Small, niche conversations.
+            
+            *Use this tab to prioritize which issues need a formal response or fact-check.*
+            """)
+    
         if not df_clustered.empty:
             sizes = df_clustered[df_clustered['cluster'] != -1].groupby('cluster').size()
             if not sizes.empty:
@@ -1536,21 +1551,22 @@ def main():
                 if risk_df.empty:
                     st.info("ℹ️ No valid risk data after filtering")
                 else:
-                    # ✅ SIMPLEST FIX: Color by numeric Count, not categorical Virality string
+                    # Top 10 chart
                     fig = px.bar(
                         risk_df.nlargest(10, 'Count'), 
                         x='Cluster', 
                         y='Count',
-                        color='Count',  # ✅ Color by numeric value (avoids KeyError)
-                        color_continuous_scale='Reds',  # ✅ Built-in continuous scale
-                        title="Top Clusters by Volume"
+                        color='Count',
+                        color_continuous_scale='Reds',
+                        title="Top 10 Narratives by Volume (Most Discussed Topics)",
+                        labels={'Count': 'Number of Posts', 'Cluster': 'Topic Group ID'}
                     )
-                    st.plotly_chart(fig, width='stretch')
+                    st.plotly_chart(fig, use_container_width=True)
                     
-                    # ✅ Show virality tier in the table below
+                    st.markdown("#### 📋 Risk Priority Table")
                     st.dataframe(
                         risk_df.nlargest(10, 'Count')[['Cluster', 'Count', 'Virality']], 
-                        width='stretch',
+                        use_container_width=True,
                         hide_index=True
                     )
             else:
@@ -1632,7 +1648,7 @@ def main():
         # 📱 PLATFORM-SPECIFIC TRENDING (TELEGRAM & TikTok)
         # =============================================================================
         st.divider()
-        st.subheader("📱 Platform Intelligence")
+        st.subheader("📱 Telegram and TikTok Analysis")
         
         # --- PREPARE DATA ---
         telegram_posts = filtered_df[filtered_df['Platform'] == 'Telegram'].copy()
