@@ -441,12 +441,25 @@ def combine_social_media_data(meltwater_df, civicsignals_df, tiktok_df=None, ope
     
     if tiktok_df is not None and not tiktok_df.empty:
         tt = pd.DataFrame()
+        # ✅ Match exact CSV column names (note the '/' instead of '.')
         tt['object_id'] = get_col(tiktok_df, ['text', 'Transcript', 'caption', 'content'])
-        tt['account_id'] = get_col(tiktok_df, ['authorMeta.name', 'username', 'creator'])
+        tt['account_id'] = get_col(tiktok_df, ['authorMeta/name', 'username', 'creator'])
         tt['content_id'] = get_col(tiktok_df, ['id', 'video_id', 'itemId'])
         tt['URL'] = get_col(tiktok_df, ['webVideoUrl', 'TikTok Link', 'url'])
-        tt['timestamp_share'] = get_col(tiktok_df, ['createTimeISO', 'timestamp', 'date'])
+        tt['timestamp_share'] = get_col(tiktok_df, ['createTimeISO', 'timestamp', 'date', 'createTime'])
         tt['source_dataset'] = 'TikTok'
+        
+        # ✅ Preserve engagement metrics for dashboard insights
+        for col in ['playCount', 'diggCount', 'commentCount', 'shareCount', 'repostCount', 'textLanguage']:
+            if col in tiktok_df.columns:
+                tt[col] = tiktok_df[col]
+                
+        # ✅ Preserve first 5 hashtag columns
+        for i in range(5):
+            hashtag_col = f'hashtags/{i}/name'
+            if hashtag_col in tiktok_df.columns:
+                tt[f'hashtag_{i}'] = tiktok_df[hashtag_col]
+                
         combined.append(tt)
     
     if openmeasures_df is not None and not openmeasures_df.empty:
@@ -1276,7 +1289,21 @@ def main():
     # Preprocess
     df_full = final_preprocess_and_map_columns(combined_raw)
     df_full['timestamp_share'] = df_full['timestamp_share'].apply(parse_timestamp_robust)
-    
+
+    openmask = df_full['source_dataset'] == 'OpenMeasure'
+    if openmask.any():
+        # Force parse OpenMeasure timestamps with more flexible formats
+        df_full.loc[openmask, 'timestamp_share'] = pd.to_datetime(
+            df_full.loc[openmask, 'timestamp_share'], 
+            errors='coerce', 
+            infer_datetime_format=True, 
+            utc=True
+        )
+        # Fill any remaining NaT with a fallback date if needed, or log them
+        na_count = df_full[openmask & df_full['timestamp_share'].isna()].shape[0]
+        if na_count > 0:
+            logger.warning(f"⚠️ {na_count} OpenMeasure posts have unparseable timestamps")
+            
     # Date filter
     valid_dates = df_full['timestamp_share'].dropna()
     if valid_dates.empty:
@@ -1631,87 +1658,42 @@ def main():
             st.markdown("#### 🎵 TikTok Trending Insights")
             
             if not tiktok_posts.empty:
-                # ✅ Extract hashtags from structured columns (hashtags/0/name, hashtags/1/name, etc.)
-                hashtag_cols = [c for c in tiktok_posts.columns if c.startswith('hashtags/') and c.endswith('/name')]
-                
-                # Aggregate all hashtags
-                all_hashtags = []
-                for col in hashtag_cols:
-                    all_hashtags.extend(tiktok_posts[col].dropna().astype(str).tolist())
-                all_hashtags = [h for h in all_hashtags if h and h.lower() not in ['nan', 'none', '']]
-                
-                # ✅ Engagement metrics summary
-                numeric_metrics = ['playCount', 'diggCount', 'commentCount', 'shareCount', 'repostCount']
-                available_metrics = [m for m in numeric_metrics if m in tiktok_posts.columns and tiktok_posts[m].notna().any()]
-                
-                # Show top posts by engagement
+                # Sort by views if available, else by date
                 if 'playCount' in tiktok_posts.columns:
-                    top_by_views = tiktok_posts.nlargest(5, 'playCount')
-                else:
-                    top_by_views = tiktok_posts.head(5)
-                
-                for _, row in top_by_views.iterrows():
-                    date_str = row['timestamp_share'].strftime('%m/%d') if pd.notna(row['timestamp_share']) else 'N/A'
-                    account = str(row.get('account_id', 'Unknown'))[:30]
+                    tiktok_posts = tiktok_posts.sort_values('playCount', ascending=False)
+                elif 'timestamp_share' in tiktok_posts.columns:
+                    tiktok_posts = tiktok_posts.sort_values('timestamp_share', ascending=False)
+                    
+                for _, row in tiktok_posts.head(5).iterrows():
+                    account = str(row.get('account_id', 'Unknown'))[:30] if pd.notna(row.get('account_id')) else 'Unknown'
+                    date_str = row['timestamp_share'].strftime('%m/%d') if pd.notna(row.get('timestamp_share')) else 'N/A'
                     
                     with st.expander(f"🎵 **{account}** • {date_str}"):
-                        # Account info
-                        st.markdown(f"**Account:** `{row.get('account_id', 'Unknown')}`")
-                        if pd.notna(row.get('timestamp_share')):
-                            st.caption(f"📅 Posted: {row['timestamp_share'].strftime('%Y-%m-%d %H:%M')}")
+                        st.markdown(f"**Account:** `{account}`")
                         
-                        # ✅ Engagement metrics (if available)
-                        if available_metrics:
-                            st.markdown("**📊 Engagement:**")
-                            metrics_col1, metrics_col2 = st.columns(2)
-                            with metrics_col1:
-                                if 'playCount' in row and pd.notna(row['playCount']):
-                                    st.metric("Views", f"{int(row['playCount']):,}")
-                                if 'diggCount' in row and pd.notna(row['diggCount']):
-                                    st.metric("Likes", f"{int(row['diggCount']):,}")
-                            with metrics_col2:
-                                if 'commentCount' in row and pd.notna(row['commentCount']):
-                                    st.metric("Comments", f"{int(row['commentCount']):,}")
-                                if 'shareCount' in row and pd.notna(row['shareCount']):
-                                    st.metric("Shares", f"{int(row['shareCount']):,}")
-                        
-                        # ✅ Hashtag analysis (from structured columns)
-                        post_hashtags = [row[col] for col in hashtag_cols if col in row and pd.notna(row[col]) and str(row[col]).strip()]
-                        if post_hashtags:
-                            st.markdown(f"**🔥 Top Hashtags:**")
-                            for tag in post_hashtags[:5]:  # Show top 5
-                                st.markdown(f"- `#{tag}`")
-                        
-                        # ✅ Language indicator
-                        if 'textLanguage' in row and pd.notna(row['textLanguage']):
-                            lang_map = {'am': '🇪🇹 Amharic', 'en': '🇬🇧 English', 'so': '🇸🇴 Somali', 'om': '🇪🇹 Oromo', 'un': '❓ Unknown'}
-                            lang_display = lang_map.get(row['textLanguage'], row['textLanguage'])
+                        # ✅ Engagement Metrics
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            if pd.notna(row.get('playCount')): st.metric("Views", f"{int(row['playCount']):,}")
+                            if pd.notna(row.get('diggCount')): st.metric("Likes", f"{int(row['diggCount']):,}")
+                        with col2:
+                            if pd.notna(row.get('commentCount')): st.metric("Comments", f"{int(row['commentCount']):,}")
+                            if pd.notna(row.get('shareCount')): st.metric("Shares", f"{int(row['shareCount']):,}")
+                            
+                        # ✅ Hashtags
+                        tags = [row.get(f'hashtag_{i}') for i in range(5) if pd.notna(row.get(f'hashtag_{i}'))]
+                        if tags:
+                            st.markdown("**🔥 Hashtags:** " + " ".join([f"`#{t}`" for t in tags]))
+                            
+                        # ✅ Language
+                        if pd.notna(row.get('textLanguage')) and str(row.get('textLanguage', '')).strip() not in ['un', 'nan', '']:
+                            lang_display = {"am": "🇪🇹 Amharic", "en": "🇬🇧 English", "om": "🇪🇹 Oromo", "so": "🇸🇴 Somali"}.get(str(row['textLanguage']), str(row['textLanguage']).upper())
                             st.caption(f"🌐 Language: {lang_display}")
-                        
-                        # ✅ Video link
+                            
+                        # ✅ Video Link
                         if pd.notna(row.get('URL')) and str(row['URL']).startswith('http'):
                             st.markdown(f"🎬 **[Watch Video 🔗]({row['URL']})**")
-                        
                         st.divider()
-                
-                # ✅ Summary stats below the posts
-                st.markdown("**📈 TikTok Summary**")
-                summary_col1, summary_col2, summary_col3 = st.columns(3)
-                with summary_col1:
-                    st.metric("Total Posts", len(tiktok_posts))
-                with summary_col2:
-                    if 'playCount' in tiktok_posts.columns and tiktok_posts['playCount'].notna().any():
-                        total_views = int(tiktok_posts['playCount'].sum())
-                        st.metric("Total Views", f"{total_views:,}")
-                    else:
-                        st.metric("Total Views", "N/A")
-                with summary_col3:
-                    if all_hashtags:
-                        unique_tags = len(set(all_hashtags))
-                        st.metric("Unique Hashtags", unique_tags)
-                    else:
-                        st.metric("Unique Hashtags", "N/A")
-                        
             else:
                 st.info("ℹ️ No TikTok posts in current date range")  
                 
