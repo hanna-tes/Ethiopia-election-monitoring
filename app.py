@@ -479,9 +479,19 @@ def final_preprocess_and_map_columns(df, coordination_mode="Text Content"):
     dfp['Platform'] = dfp['URL'].apply(infer_platform_from_url)
     
     if 'source_dataset' in dfp.columns:
-        for p in ['TikTok','tiktok','vt.tiktok']: dfp.loc[dfp['source_dataset'].str.contains(p, case=False, na=False), 'Platform'] = 'TikTok'
-        for p in ['Telegram','telegram','t.me']: dfp.loc[dfp['source_dataset'].str.contains(p, case=False, na=False), 'Platform'] = 'Telegram'
-        for p in ['Media','News','Civicsignal']: dfp.loc[dfp['source_dataset'].str.contains(p, case=False, na=False), 'Platform'] = 'Media'
+        # Map TikTok
+        for p in ['TikTok','tiktok','vt.tiktok']: 
+            dfp.loc[dfp['source_dataset'].str.contains(p, case=False, na=False), 'Platform'] = 'TikTok'
+        
+        # Map Telegram (including OpenMeasure dataset)
+        # ✅ FIX: OpenMeasure = Telegram data
+        telegram_patterns = ['Telegram','telegram','t.me','OpenMeasure']
+        for p in telegram_patterns:
+            dfp.loc[dfp['source_dataset'].str.contains(p, case=False, na=False), 'Platform'] = 'Telegram'
+        
+        # Map Media/News
+        for p in ['Media','News','Civicsignal']: 
+            dfp.loc[dfp['source_dataset'].str.contains(p, case=False, na=False), 'Platform'] = 'Media'
     
     dfp['Outlet'], dfp['Channel'], dfp['cluster'] = np.nan, np.nan, -1
     if 'Sentiment' not in dfp.columns: dfp['Sentiment'] = np.nan
