@@ -1500,7 +1500,7 @@ def main():
             st.info("ℹ️ No narrative summaries generated. Check data volume or LLM API status.")
         else:
             for summary in sorted(all_summaries, key=lambda x: x['Total_Reach'], reverse=True):
-                # ✅ FIX 1: Skip clusters with no meaningful content
+                #  Skip clusters with no meaningful content
                 context = summary.get('Context', '').lower()
                 if any(phrase in context for phrase in [
                     "no explicit claims", 
@@ -1510,11 +1510,10 @@ def main():
                     "summary generation failed",
                     "no evidence for",
                     "accounts do not exist",
-                    "none"  # Catch sections that just say "None"
+                    "none"
                 ]):
-                    continue  # Skip this cluster entirely
+                    continue
                 
-                # Also skip if all key sections appear empty
                 if all(empty_phrase in context for empty_phrase in [
                     "explicit claims: none",
                     "targeted groups: none", 
@@ -1531,13 +1530,10 @@ def main():
                 m2.metric("Amplifiers", f"{summary['Amplifiers_Count']:,}")
                 m3.caption(f"Platforms: {summary['Top_Platforms']}")
                 
-                # ✅ FIX 2: Format summary with proper line breaks
+                #  Format summary with proper line breaks
                 st.markdown("**📋 Narrative Intelligence Report**")
                 
-                # Split context by common section headers and add proper formatting
                 formatted_context = summary['Context']
-                
-                # Add markdown formatting to section headers for better display
                 section_headers = [
                     'NARRATIVE THEME:', 'EXPLICIT CLAIMS:', 'TARGETED GROUPS/ENTITIES:', 
                     'LANGUAGE/TONE OBSERVED:', 'SAMPLE QUOTES:', 'Key Findings:', 
@@ -1545,34 +1541,99 @@ def main():
                 ]
                 
                 for header in section_headers:
-                    # Add bold + emoji formatting to headers, ensure they start on new line
-                    formatted_context = formatted_context.replace(
-                        header, 
-                        f"\n\n**{header}**\n"
-                    )
+                    formatted_context = formatted_context.replace(header, f"\n\n**{header}**\n")
                 
-                # Ensure bullet points display properly
                 formatted_context = formatted_context.replace('- [', '- [').replace('\n-', '\n- ')
-                
-                # Display with proper whitespace
                 st.markdown(formatted_context.strip())
                 
-                # Originators
                 if summary['Originators'] != "Unknown":
                     st.caption(f"🔍 Originators: {summary['Originators']}")
                 
-                # Evidence table (collapsible)
                 with st.expander(f"📂 View Cluster Evidence ({summary['Total_Reach']} posts)"):
                     pdf = summary['Posts_Data'].copy()
                     if 'timestamp_share' in pdf.columns:
                         pdf['Timestamp'] = pdf['timestamp_share'].dt.strftime('%Y-%m-%d %H:%M')
+                    display_cols = ['Timestamp', 'Platform', 'account_id', 'object_id', 'URL'] if 'Timestamp' in pdf.columns else ['Platform', 'account_id', 'object_id', 'URL']
                     st.dataframe(
-                        pdf[['Timestamp', 'Platform', 'account_id', 'object_id', 'URL']] if 'Timestamp' in pdf.columns else pdf[['Platform', 'account_id', 'object_id', 'URL']],
+                        pdf[display_cols],
                         use_container_width=True,
                         hide_index=True,
                         column_config={"URL": st.column_config.LinkColumn("Link", display_text="🔗 View")}
                     )
-                st.divider()
+                st.divider()  
+        
+        # =============================================================================
+        # 📱 PLATFORM-SPECIFIC TRENDING (TELEGRAM & TikTok)
+        # =============================================================================
+        st.divider()
+        st.subheader("📱 Telegram and Tiktok Trending Content")
+        st.caption("Most recent trending posts from Telegram and TikTok")
+        
+        #  OpenMeasure = Telegram, TikTok = TikTok
+        telegram_posts = filtered_df[filtered_df['source_dataset'] == 'OpenMeasure'].copy()
+        tiktok_posts = filtered_df[filtered_df['source_dataset'] == 'TikTok'].copy()
+        
+        # Create two columns for side-by-side view
+        col_telegram, col_tiktok = st.columns(2)
+        
+        # --- TELEGRAM  SECTION ---
+        with col_telegram:
+            st.markdown("#### 📱 Telegram Posts (via OpenMeasure)")
+            
+            if not telegram_posts.empty:
+                telegram_posts = telegram_posts.sort_values('timestamp_share', ascending=False)
+                
+                for _, row in telegram_posts.head(5).iterrows():
+                    date_str = row['timestamp_share'].strftime('%m/%d %H:%M') if pd.notna(row['timestamp_share']) else 'N/A'
+                    account_str = str(row['account_id'])[:25]
+                    
+                    with st.expander(f"📄 **{account_str}** • {date_str}"):
+                        st.markdown(f"**Account:** `{row['account_id']}`")
+                        if pd.notna(row['timestamp_share']):
+                            st.caption(f"📅 Posted: {row['timestamp_share'].strftime('%Y-%m-%d %H:%M')}")
+                        
+                        content = str(row['object_id']).strip()
+                        if len(content) > 150:
+                            st.markdown(f"**Message:** {content[:150]}...")
+                            with st.expander("📖 Read full message"):
+                                st.write(content)
+                        else:
+                            st.markdown(f"**Message:** {content}")
+                        
+                        if pd.notna(row['URL']) and row['URL'].startswith('http'):
+                            st.markdown(f"🔗 **[Open in Telegram]({row['URL']})**")
+            else:
+                st.info("ℹ️ No Telegram posts (OpenMeasure) in current date range")
+        
+        # --- TIKTOK SECTION ---
+        with col_tiktok:
+            st.markdown("#### 🎵 TikTok Posts")
+            
+            if not tiktok_posts.empty:
+                tiktok_posts = tiktok_posts.sort_values('timestamp_share', ascending=False)
+                
+                for _, row in tiktok_posts.head(5).iterrows():
+                    date_str = row['timestamp_share'].strftime('%m/%d %H:%M') if pd.notna(row['timestamp_share']) else 'N/A'
+                    account_str = str(row['account_id'])[:25]
+                    
+                    with st.expander(f"🎵 **{account_str}** • {date_str}"):
+                        st.markdown(f"**Account:** `{row['account_id']}`")
+                        if pd.notna(row['timestamp_share']):
+                            st.caption(f"📅 Posted: {row['timestamp_share'].strftime('%Y-%m-%d %H:%M')}")
+                        
+                        content = str(row['object_id']).strip()
+                        if len(content) > 150:
+                            st.markdown(f"**Caption/Transcript:** {content[:150]}...")
+                        else:
+                            st.markdown(f"**Caption/Transcript:** {content}")
+                        
+                        if pd.notna(row['URL']) and row['URL'].startswith('http'):
+                            st.markdown(f"🎬 **[Watch Video]({row['URL']})**")
+            else:
+                st.info("ℹ️ No TikTok posts in current date range")
+        
+        # Optional footer note
+        st.caption("*Note: Telegram data sourced from OpenMeasure dataset. TikTok data sourced directly from TikTok API.*")
             
     # === TAB 6: Network & Coordination Intelligence ===
     with tabs[5]:
